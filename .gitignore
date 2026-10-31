@@ -5,3 +5,7 @@ target/
 __pycache__/
 .venv/
 .near-credentials/
+
+# Safety net: never commit private material
+PRIVATE*
+*private*
