@@ -8,6 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/config.sh
+[ "$NETWORK" = "testnet" ] || { echo "policy-testnet is for test vaults only (NETWORK=$NETWORK)."; exit 1; }
 FUND="${LEASH_FUND:-5 NEAR}"
 
 step "Owner clears any earlier policy (fresh daily counter)"

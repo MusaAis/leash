@@ -4,41 +4,113 @@
 
 [![CI](https://github.com/MusaAis/leash/actions/workflows/ci.yml/badge.svg)](https://github.com/MusaAis/leash/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-MIT-blue)
+![Network](https://img.shields.io/badge/network-NEAR%20testnet-informational)
 
-LEASH is an on-chain spending-control layer for AI agents on NEAR. Agents can pay, but only inside rules the owner sets and the blockchain enforces. Built for NEAR HACKATHON.
+LEASH is an on-chain spending-control layer for AI agents on NEAR. The funds sit in a vault contract, and an agent can only ask the vault to pay. The vault enforces the owner's limits on-chain, so an agent that is tricked, buggy or hijacked cannot move money outside its policy. Built for NEAR HACKATHON.
 
-## Why
+[Why it matters](#why-it-matters) · [How it works](#how-it-works) · [Verified results](#verified-results) · [Quick start](#quick-start) · [Agent runtime](#agent-runtime-and-attack-suite) · [NEAR usage](#how-leash-uses-near) · [Documentation](#documentation)
 
-Giving an AI agent a key means trusting it with everything that key controls. If the agent is tricked, buggy or compromised, the funds are gone. Guardrails inside the agent's own process do not help, because a compromised agent bypasses them.
+## Why it matters
+
+Giving an AI agent a key means trusting it with everything that key controls. If the agent is tricked by prompt injection, buggy or compromised, the funds are gone. Guardrails inside the agent's own process do not help, because a compromised agent bypasses them. LEASH moves the guardrail out of the agent and into a contract the agent cannot change.
 
 ## How it works
 
-The funds sit in the LEASH vault contract, not in the agent's account. The agent can only ask the vault to pay.
+<p align="center">
+  <img src="docs/img/architecture.svg" alt="The owner funds the vault and sets policy. The agent asks the vault to spend. The vault pays the payee if the policy allows it, and otherwise records a denial event." width="440">
+</p>
 
 1. The owner funds the vault and sets a policy per agent.
-2. The agent calls `spend(to, amount)`.
-3. The contract checks the policy. Allowed: funds move. Denied: nothing moves, and a `spend_denied` event with a reason is recorded on-chain.
-4. The owner can pause one agent or everything at any time.
+2. The agent calls `spend(to, amount, memo)`. The agent account holds only gas money.
+3. The contract checks the policy. Allowed: the transfer is scheduled and a `spend_allowed` event is recorded. Denied: nothing moves, and a `spend_denied` event with a reason is recorded and counted on-chain.
+4. The owner can pause one agent or every agent at any time. The owner can always withdraw.
 
-```mermaid
-flowchart LR
-    Owner -->|fund, set policy, pause| Vault[LEASH vault contract]
-    Agent -->|spend| Vault
-    Vault -->|allowed| Payee
-    Vault -.->|denied: event + counter| Log[(Event log)]
-```
+### What the vault checks
 
-## Policy rules
+<p align="center">
+  <img src="docs/img/spend-checks.svg" alt="The vault checks, in order: caller has a policy, kill switch, memo length, agent pause, zero amount, per-payment cap, allowlist, daily cap, available funds. The first check that applies denies the payment." width="440">
+</p>
 
 | Rule | Description |
 |---|---|
 | Per-transaction cap | Maximum amount for a single payment |
-| Daily cap | Maximum total per 24-hour window |
+| Daily cap | Maximum total per fixed 24-hour window |
 | Destination allowlist | Up to 20 accounts the agent may pay |
 | Agent pause | Blocks one agent immediately |
 | Global kill switch | Blocks every agent immediately |
 
-Denial reasons: `all_paused`, `agent_paused`, `zero_amount`, `over_per_tx_cap`, `not_allowlisted`, `over_daily_cap`, `insufficient_funds`, `memo_too_long`.
+## Verified results
+
+Measured on NEAR testnet. Every row has its evidence in [docs/testnet-proof.md](docs/testnet-proof.md), and the latest run links every vault call to the explorer.
+
+| Check | Result |
+|---|---|
+| Contract unit tests | 40 passed |
+| Agent unit tests | 67 passed |
+| Scripted testnet demo (`make demo-testnet`) | 12 checks passed, 0 failed |
+| Hijacked agent, every request sent straight to the vault | 12 of 12 attempts blocked, 0 paid to a non-payee |
+| Live model, attack text only | Control task passed. 8 of 8 attacks refused by the agent |
+| Live model, authorized invoice with the attack inside it | 8 of 8 payments went to the authorized payee, 0 redirected (destination checked, amount not compared) |
+| Cost of the live run | 17 model calls, about 9,400 to 10,200 tokens (two runs) |
+
+This is one live run at temperature 0 with eight attack texts, not a proof of robustness. In the authorized-invoice scenario the model was not fooled, so the vault had nothing to block there. What the vault does against a fully fooled agent is what the hijacked-agent run shows.
+
+## Quick start
+
+Prerequisites:
+
+- Rust (stable) with the `wasm32-unknown-unknown` target, and `make`
+- Python 3.9 or newer (agent runtime and its tests; no third-party packages)
+- For the wasm build and the testnet demo only: [cargo-near](https://github.com/near/cargo-near), [near-cli-rs](https://github.com/near/near-cli-rs) and network access. See the [deployment guide](docs/deployment.md).
+
+Run the tests:
+
+```
+make test         # contract tests
+make test-agent   # agent tests
+make check        # format check, lint, contract and agent tests
+```
+
+Expected: `make test` ends with `test result: ok. 40 passed`, and `make test-agent` prints `Ran 67 tests` followed by `OK`.
+
+### Testnet demo (optional, needs network)
+
+A scripted run with a pass/fail check per step: the owner sets a policy, the agent pays an allowed payee, two attacks are blocked, the daily cap is exhausted, one agent is paused, the kill switch stops everything, payments resume, and a failed transfer is handled.
+
+```
+export LEASH_PREFIX=myleash   # a unique name; use a fresh one for every demo run
+make accounts-testnet         # create five faucet-funded testnet accounts
+make deploy-testnet           # build, deploy and initialize the vault in one transaction
+make demo-testnet             # run the scripted scenario
+```
+
+Expected: the demo ends with `Result: N passed, 0 failed`. Allowed payments return `true`. Blocked ones return `false` and emit a `spend_denied` event with the reason. Use a fresh prefix for every run, because the daily cap (3 NEAR) carries over on the same vault. If the testnet faucet answers `429`, the account script waits and retries. Details: [deployment guide](docs/deployment.md).
+
+## Agent runtime and attack suite
+
+A Python agent (standard library only) asks a NEAR AI Cloud model whether to pay, then calls the vault. An attack suite tries eight kinds of manipulation against it: instruction override, fake admin notice, social engineering, encoded payload, tool-output injection, look-alike address, oversized payment and a payment split into small parts.
+
+```
+cp .env.example .env     # set LEASH_PREFIX and NEAR_AI_API_KEY
+make agent-check         # configuration and vault counters
+make policy-testnet      # test vaults only: fresh policy and funds, without the full demo
+make attack-testnet      # hijacked agent: what does the vault block?
+make attack-llm-testnet  # the real model sees every attack text
+```
+
+The report lists every attempt with its outcome and ends with totals. The command exits with code 2 if any payment reached a destination other than the payee. Live runs are capped by `NEAR_AI_MAX_TOKENS`, `LEASH_MAX_MODEL_CALLS` and `LEASH_MAX_TOTAL_TOKENS`, so a mistake cannot spend the credits. Details: [agent runtime](docs/agent.md).
+
+## How LEASH uses NEAR
+
+| NEAR feature | Use in LEASH | State |
+|---|---|---|
+| Smart contract (Rust, near-sdk 5) | The vault: custody, policy engine, event log | Implemented, deployed on testnet |
+| Separate named accounts | Vault, owner, agent and payee are different accounts, so the agent never holds the funds | Implemented |
+| One-yoctoNEAR rule | Owner methods that move funds or widen limits need exactly 1 yoctoNEAR, which function-call keys cannot attach. A leaked function-call key can only pause | Implemented and tested |
+| Full-access key removal | `make lock-vault-testnet` deletes the vault's full-access keys, so no one can bypass the policy or replace the contract | Script ready, for the final vault |
+| NEP-297 style events | `EVENT_JSON:` logs with standard `leash` for every decision | Implemented |
+| NEAR AI Cloud | The agent's decisions, through its OpenAI-compatible API | Implemented |
+| NEAR Intents, Chain Signatures | Cross-chain payments behind the same vault | Planned |
 
 ## Contract interface
 
@@ -54,7 +126,29 @@ Denial reasons: `all_paused`, `agent_paused`, `zero_amount`, `over_per_tx_cap`, 
 | `spend(to, amount, memo)` | Agent | Returns `true` if scheduled, `false` if denied |
 | `get_policy`, `get_stats`, `get_owner`, `is_paused_all`, `get_available_balance` | Anyone | Views |
 
-Events follow an `EVENT_JSON:` log format with standard `leash`: `funded`, `withdrawn`, `policy_set`, `agent_removed`, `agent_paused`, `agent_resumed`, `paused_all`, `resumed_all`, `spend_allowed`, `spend_denied`.
+Events: `funded`, `withdrawn`, `policy_set`, `agent_removed`, `agent_paused`, `agent_resumed`, `paused_all`, `resumed_all`, `spend_allowed`, `spend_denied`. Denial reasons: `all_paused`, `memo_too_long`, `agent_paused`, `zero_amount`, `over_per_tx_cap`, `not_allowlisted`, `over_daily_cap`, `insufficient_funds`.
+
+## Security
+
+The agent is never the last line of defense: the contract rejects any destination, amount or rate outside the policy, whatever the agent decides. The [security model](docs/security.md) lists the adversaries and mitigations. Main known limitations:
+
+- The daily window is fixed, so across a window boundary up to twice the daily cap can be spent in a short time.
+- Spend is counted before the transfer settles. A failed transfer still uses up the cap (it fails closed).
+- The owner key is a single point of control. A guardian and two-step ownership transfer are planned.
+- Only native NEAR is supported.
+
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+
+## Project structure
+
+```
+contract/            Rust vault contract and its unit tests
+agent/leash_agent/   agent runtime: brain (model), chain (vault client), attacks, CLI
+agent/tests/         agent unit tests
+scripts/             testnet accounts, deploy, demo, policy, lock and release scripts
+docs/                architecture, agent runtime, deployment, security, testnet proof, ADRs
+Makefile             short entry points for every command above
+```
 
 ## Status
 
@@ -64,60 +158,25 @@ Events follow an `EVENT_JSON:` log format with standard `leash`: `funded`, `with
 | Per-agent pause, global kill switch | Implemented |
 | Owner methods protected against function-call key leaks | Implemented |
 | Event log and on-chain allow/deny counters | Implemented |
-| Testnet deployment and scripted demo | Done (see [proof](docs/testnet-proof.md)) |
+| Testnet deployment and scripted demo | Done, see [proof](docs/testnet-proof.md) |
+| Agent runtime with NEAR AI Cloud decisions and attack suite | Implemented, tested on testnet |
 | Mainnet deployment | Planned |
-| Agent runtime with NEAR AI Cloud decisions and attack suite | Implemented |
 | Cross-chain payments, Arena, SDK | Planned |
-
-## Quick start
-
-Prerequisites:
-
-- Rust (stable) with the `wasm32-unknown-unknown` target, and `make`
-- Python 3.9 or newer (agent runtime and its tests; no third-party packages)
-- For the wasm build and the testnet demo only: [cargo-near](https://github.com/near/cargo-near), [near-cli-rs](https://github.com/near/near-cli-rs) and network access. See the [deployment guide](docs/deployment.md).
-
-```
-make test         # contract tests
-make test-agent   # agent tests
-make check        # format check, lint, contract and agent tests
-```
-
-Expected result of `make test`: `test result: ok. 40 passed`.
-Expected result of `make test-agent`: `Ran 44 tests` followed by `OK`.
-
-## Testnet demo (optional, needs network)
-
-A scripted run on NEAR testnet with a pass/fail check per step: the owner sets a policy, the agent pays an allowed payee, two attacks are blocked, the kill switch stops everything, and payments resume.
-
-```
-make accounts-testnet   # create four faucet-funded testnet accounts
-make deploy-testnet     # build, deploy and initialize the vault in one transaction
-make demo-testnet       # run the scripted scenario
-```
-
-Set `LEASH_PREFIX` to a unique name first, for example `export LEASH_PREFIX=myleash`, and use a fresh prefix for every run of the demo (the daily cap is 3 NEAR). The demo ends with `Result: N passed, 0 failed`. Allowed payments return `true`; blocked ones return `false` and emit a `spend_denied` event with the reason. Details: [deployment guide](docs/deployment.md). A recorded run with transaction links is in [docs/testnet-proof.md](docs/testnet-proof.md).
-
-## Agent runtime
-
-A Python agent (no third-party dependencies) asks a NEAR AI Cloud model whether to pay, then calls the vault. An attack suite tries eight kinds of manipulation against it.
-
-```
-cp .env.example .env     # set LEASH_PREFIX and NEAR_AI_API_KEY
-make agent-check         # configuration and vault counters
-make attack-testnet      # hijacked agent: what does the vault block?
-```
-
-Details: [agent runtime](docs/agent.md).
 
 ## Documentation
 
+- [Architecture](docs/architecture.md)
 - [Agent runtime](docs/agent.md)
 - [Deployment guide](docs/deployment.md)
 - [Security model](docs/security.md)
+- [Testnet proof](docs/testnet-proof.md)
 - [Architecture decisions](docs/adr)
-- [Security policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
+
+## Pre-existing code
+
+No pre-existing code is included in this repository. Any later integration of earlier work will live in its own directory and be listed here with a link to the diff.
 
 ## License
 
-MIT
+MIT, see [LICENSE](LICENSE).

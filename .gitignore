@@ -1,4 +1,8 @@
 .env
+.env.*
+!.env.example
+*.pem
+report*.json
 *.key
 node_modules/
 target/

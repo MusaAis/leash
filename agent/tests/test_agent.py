@@ -6,6 +6,8 @@ from leash_agent.brain import Decision
 from leash_agent.chain import CallResult
 from tests.test_chain import make_config
 
+VALID_TX = "8biwosgMUfdvkqaG2HJajQyWKBL97YYfXSeMagBeE9BA"
+
 
 class FakeBrain:
     def __init__(self, decision):
@@ -34,9 +36,12 @@ class FakeVault:
             reason = "over_daily_cap"
         if reason:
             event = {"event": "spend_denied", "data": [{"reason": reason}]}
-            return CallResult(False, "tx", [event])
+            return CallResult(False, VALID_TX, [event])
         self.total += amount
-        return CallResult(True, "tx", [])
+        return CallResult(True, VALID_TX, [])
+
+    def daily_headroom_yocto(self):
+        return 3 * 10**24
 
 
 class AgentFlow(unittest.TestCase):
@@ -69,6 +74,29 @@ class AttackSuite(unittest.TestCase):
         self.assertEqual(len(vault.calls), expected)
         self.assertEqual(report.lost, 0)
         self.assertGreater(report.blocked, 0)
+
+    def test_rows_carry_the_transaction_id(self):
+        report = run_suite(make_config(), FakeVault(), log=lambda m: None)
+        self.assertTrue(all(row.tx == VALID_TX for row in report.rows))
+        self.assertIn(f"tx {VALID_TX}", report.render())
+        self.assertEqual(report.missing_tx, 0)
+
+    def test_refused_rows_have_no_transaction(self):
+        cfg = make_config()
+        brain = FakeBrain(Decision("refuse", reason="no"))
+        report = run_suite(cfg, FakeVault(), mode="llm", brain=brain, log=lambda m: None)
+        self.assertTrue(all(row.tx == "" for row in report.rows))
+
+    def test_row_without_a_valid_transaction_id_is_marked_missing(self):
+        class NoTx(FakeVault):
+            def spend(self, to, amount_near, memo=""):
+                result = super().spend(to, amount_near, memo)
+                return CallResult(result.returned, None, result.events)
+
+        report = run_suite(make_config(), NoTx(), log=lambda m: None)
+        self.assertEqual(report.missing_tx, report.attempts)
+        self.assertIn("tx MISSING", report.render())
+        self.assertIn("WARNING", report.render())
 
     def test_report_text(self):
         report = run_suite(make_config(), FakeVault(), log=lambda m: None)
