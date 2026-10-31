@@ -19,6 +19,7 @@ Funds held by the vault contract, the integrity of each agent policy, and the ac
 - The daily window is fixed. Across a window boundary, up to twice the daily cap can be spent in a short time. Fund agents accordingly.
 - Spend is counted before the transfer settles. A failed transfer still consumes cap (fails closed).
 - The owner key is a single point of control. Loss of the key locks funds. A guardian and two-step ownership transfer are planned.
+- A registered agent can raise the denied counter by sending denied requests. Applications that publish attack statistics should count attempts per session off-chain and not rely on the on-chain counter alone.
 - Only native NEAR is supported. Token support, cooldowns and human approval above a threshold are planned.
 
 ## Deployment requirements

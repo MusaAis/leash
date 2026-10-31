@@ -73,14 +73,27 @@ Requirements: Rust (stable) and, for the wasm build, [cargo-near](https://github
 
 ```
 make test    # run the contract tests
-make check   # formatting-independent lint + tests
+make check   # format check, lint and tests
 make build   # build the wasm
 ```
 
 Expected result of `make test`: all tests pass.
 
+## Testnet demo
+
+A scripted run on NEAR testnet: the owner sets a policy, the agent pays an allowed payee, two attacks are blocked, the kill switch stops everything, and payments resume.
+
+```
+make accounts-testnet   # create four faucet-funded testnet accounts
+make deploy-testnet     # build, deploy and initialize the vault in one transaction
+make demo-testnet       # run the scripted scenario
+```
+
+Set `LEASH_PREFIX` to a unique name first, for example `export LEASH_PREFIX=myleash`. Allowed payments return `true`; blocked ones return `false` and emit a `spend_denied` event with the reason. Details: [deployment guide](docs/deployment.md). A recorded run with transaction links is in [docs/testnet-proof.md](docs/testnet-proof.md).
+
 ## Documentation
 
+- [Deployment guide](docs/deployment.md)
 - [Security model](docs/security.md)
 - [Architecture decisions](docs/adr)
 - [Security policy](SECURITY.md)

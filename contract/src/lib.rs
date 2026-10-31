@@ -739,4 +739,98 @@ mod tests {
         owner_ctx(&owner, T0);
         let _ = c.withdraw(U128(1_000 * NEAR));
     }
+
+    // ----- one-yocto rule on every fund-moving owner method -----
+
+    #[test]
+    #[should_panic(expected = "Requires attached deposit")]
+    fn withdraw_needs_one_yocto() {
+        let (mut c, owner, _a, _t) = setup();
+        set_ctx(&owner, T0);
+        let _ = c.withdraw(U128(1));
+    }
+
+    #[test]
+    #[should_panic(expected = "Requires attached deposit")]
+    fn remove_agent_needs_one_yocto() {
+        let (mut c, owner, agent, _t) = setup();
+        set_ctx(&owner, T0);
+        c.remove_agent(agent);
+    }
+
+    #[test]
+    #[should_panic(expected = "Requires attached deposit")]
+    fn resume_agent_needs_one_yocto() {
+        let (mut c, owner, agent, _t) = setup();
+        set_ctx(&owner, T0);
+        c.resume_agent(agent);
+    }
+
+    #[test]
+    #[should_panic(expected = "Requires attached deposit")]
+    fn resume_all_needs_one_yocto() {
+        let (mut c, owner, _a, _t) = setup();
+        set_ctx(&owner, T0);
+        c.resume_all();
+    }
+
+    #[test]
+    #[should_panic(expected = "Requires attached deposit")]
+    fn two_yocto_is_rejected() {
+        let (mut c, owner, agent, target) = setup();
+        testing_env!(ctx(&owner, T0, 2).build());
+        c.set_policy(agent, U128(NEAR), U128(NEAR), vec![target]);
+    }
+
+    #[test]
+    fn pause_methods_work_without_deposit() {
+        let (mut c, owner, agent, _t) = setup();
+        set_ctx(&owner, T0);
+        c.pause_agent(agent.clone());
+        c.pause_all();
+        assert!(c.is_paused_all());
+        assert!(c.get_policy(agent).unwrap().paused);
+    }
+
+    // ----- money in and out -----
+
+    #[test]
+    #[should_panic(expected = "attach NEAR to fund")]
+    fn fund_rejects_zero_deposit() {
+        let (mut c, _o, _a, _t) = setup();
+        set_ctx(&accounts(3), T0);
+        c.fund();
+    }
+
+    #[test]
+    fn fund_emits_event() {
+        let (mut c, _o, _a, _t) = setup();
+        testing_env!(ctx(&accounts(3), T0, 5 * NEAR).build());
+        c.fund();
+        assert!(get_logs().iter().any(|l| {
+            l.contains("\"event\":\"funded\"") && l.contains("5000000000000000000000000")
+        }));
+    }
+
+    #[test]
+    fn withdraw_up_to_available_succeeds_and_emits_event() {
+        let (mut c, owner, _a, _t) = setup();
+        owner_ctx(&owner, T0);
+        let available = c.get_available_balance().0;
+        assert!(available > NEAR);
+        assert!(available <= 100 * NEAR - RESERVE_BUFFER);
+        let _ = c.withdraw(U128(available));
+        assert!(get_logs()
+            .iter()
+            .any(|l| l.contains("\"event\":\"withdrawn\"")));
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid amount")]
+    fn withdraw_rejects_one_above_available() {
+        let (mut c, owner, _a, _t) = setup();
+        owner_ctx(&owner, T0);
+        let available = c.get_available_balance().0;
+        let _ = c.withdraw(U128(available + 1));
+    }
 }
