@@ -1,0 +1,7 @@
+.env
+*.key
+node_modules/
+target/
+__pycache__/
+.venv/
+.near-credentials/
