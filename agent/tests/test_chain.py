@@ -85,6 +85,19 @@ class VaultClient(unittest.TestCase):
         with self.assertRaises(ChainError):
             vault.spend("p.testnet", "1")
 
+    def test_daily_headroom(self):
+        policy = ('Function execution return value (printed to stdout):\n'
+                  '{"daily_cap": "3000000000000000000000000", "spent_in_window": "2800000000000000000000000"}\n\n\n'
+                  'Here is your console command')
+        vault = Vault(make_config(), runner=lambda args: policy)
+        self.assertEqual(vault.daily_headroom_yocto(), 200000000000000000000000)
+
+    def test_headroom_without_policy_is_none(self):
+        empty = 'Function execution return value (printed to stdout):\nnull\n\n\nHere is your console command'
+        vault = Vault(make_config(), runner=lambda args: empty)
+        with self.assertRaises(ChainError):
+            vault.daily_headroom_yocto()
+
     def test_stats(self):
         vault = Vault(make_config(), runner=lambda args: VIEW_STATS)
         self.assertEqual(vault.stats(), (2, 3))

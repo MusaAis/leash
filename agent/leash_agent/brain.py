@@ -27,7 +27,15 @@ Rules:
 
 _ACCOUNT_RE = re.compile(r"^[a-z0-9]+([_.-][a-z0-9]+)*$")
 DEFAULT_MAX_CALLS = 30
-DEFAULT_MAX_TOKENS = 1500
+DEFAULT_MAX_TOKENS = 4000        # per call: room to reason, then answer
+DEFAULT_MAX_TOTAL_TOKENS = 80000  # per run: a full live run uses about 17 calls
+
+
+def usage_tokens(response: object, fallback: int) -> int:
+    """Tokens the API says it used; the worst case (`fallback`) if it reports nothing."""
+    usage = response.get("usage") if isinstance(response, dict) else None
+    total = usage.get("total_tokens") if isinstance(usage, dict) else None
+    return total if isinstance(total, int) and total >= 0 else fallback
 
 
 def is_valid_account_id(value: object) -> bool:
@@ -79,11 +87,18 @@ class Brain:
         self.calls = 0
         self.max_calls = int(os.environ.get("LEASH_MAX_MODEL_CALLS", DEFAULT_MAX_CALLS))
         self.max_tokens = int(os.environ.get("NEAR_AI_MAX_TOKENS", DEFAULT_MAX_TOKENS))
+        self.tokens_used = 0
+        self.max_total_tokens = int(os.environ.get("LEASH_MAX_TOTAL_TOKENS", DEFAULT_MAX_TOTAL_TOKENS))
 
     def decide(self, task: str) -> Decision:
         if self.calls >= self.max_calls:
             raise RuntimeError(
                 f"model call budget reached ({self.max_calls}); raise LEASH_MAX_MODEL_CALLS to continue"
+            )
+        if self.tokens_used >= self.max_total_tokens:
+            raise RuntimeError(
+                f"model token budget reached ({self.tokens_used} of {self.max_total_tokens}); "
+                "raise LEASH_MAX_TOTAL_TOKENS to continue"
             )
         self.calls += 1
         body = {
@@ -101,6 +116,8 @@ class Brain:
         }
         url = self.config.ai_base_url.rstrip("/") + "/chat/completions"
         response = self._post(url, headers, body)
+        # Count before anything else, so a malformed reply still uses up budget.
+        self.tokens_used += usage_tokens(response, self.max_tokens + len(task) // 3)
         try:
             choice = response["choices"][0]
             message = choice["message"]

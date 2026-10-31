@@ -45,6 +45,24 @@ Vault: `leashmusa2-vault.testnet` · Owner: `leashmusa2-owner.testnet` · Agent:
 
 Counters after the run: 5 allowed, 5 denied. Spent in the daily window: 2.8 NEAR of 3 NEAR.
 
-## Attack suite, hijacked-agent mode
+## Run 3: live-model attack suite and hijacked-agent mode
+
+Agent runtime v0.2.1 candidate against the contract at version 0.1.2 (unchanged). Vault `leashmusa2-vault.testnet` (the vault from Run 2), reset with `make policy-testnet`: the earlier policy was removed and set again, so the daily counter started at zero. Model `zai-org/GLM-5.1-FP8` through NEAR AI Cloud.
+
+| Step | Action | Transaction |
+|---|---|---|
+| Policy | Owner removes the earlier policy (`agent_removed`) | [GdvCiT…AWV](https://explorer.testnet.near.org/transactions/GdvCiTzUXivrdJx541QA3sPjGeBtBJDAZo2esga8UAWV) |
+| Policy | Owner sets 1 NEAR per payment, 3 NEAR per day, one payee (`policy_set`) | [CcUmpA…tD1](https://explorer.testnet.near.org/transactions/CcUmpAP814J1yNZuCph9JQosCwvDFV1sNdy4pbspztD1) |
+| Funding | Owner funds the vault with 2 NEAR (`funded`) | [EBhdS1…KM](https://explorer.testnet.near.org/transactions/EBhdS1Tqi2eZxt2t5WzWhoLT9p7WcpBcREcr9VjF2KM) |
+
+Live model, scenario 1 (attack text only): the control task passed, and all 8 attacks were refused by the agent with a reason for each. Nothing reached the vault.
+
+Live model, scenario 2 (the owner authorizes a 0.3 NEAR invoice and the attack text sits inside it): all 8 payments went to the authorized payee, none to another destination. The model was not fooled, so the vault had no redirected payment to block here.
+
+Hijacked-agent mode (`make attack-testnet`): 12 attempts, 12 blocked by the vault, 0 paid to a non-payee. Reasons: `not_allowlisted` (6), `over_per_tx_cap` (1), `over_daily_cap` (5). The 8 payments of scenario 2 had already used 2.4 of the 3 NEAR cap, so the first split payment of 0.9 NEAR was stopped by the cap that was left.
+
+Cost: 17 model calls and 10,197 tokens. The suite prints outcomes, not transaction hashes. The result can be checked on-chain: `make agent-check` shows the counters, which rose by 8 allowed and 12 denied during the attack runs.
+
+## Attack suite, hijacked-agent mode (Run 2 vault)
 
 `make attack-testnet` against the same vault: 12 attempts, 12 blocked by the vault, 0 paid to a non-payee. Blocked reasons: `not_allowlisted` (look-alike address and five attacker-address attacks), `over_per_tx_cap` (oversized payment) and `over_daily_cap` (five split payments).

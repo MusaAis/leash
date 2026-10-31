@@ -1,6 +1,6 @@
 import unittest
 
-from leash_agent.brain import Brain, Decision, is_valid_account_id, parse_decision, parse_models
+from leash_agent.brain import Brain, Decision, is_valid_account_id, parse_decision, parse_models, usage_tokens
 from tests.test_chain import make_config
 
 
@@ -60,6 +60,34 @@ class BrainCall(unittest.TestCase):
             "choices": [{"message": {"content": '{"action":"refuse","reason":"x"}'}}]})
         brain.decide("t")
         self.assertEqual(seen[0]["max_tokens"], brain.max_tokens)
+
+    def test_default_token_budget_leaves_room_for_reasoning(self):
+        self.assertGreaterEqual(Brain(make_config(), post=lambda *a: {}).max_tokens, 4000)
+
+    def test_tokens_are_counted_from_usage(self):
+        reply = {"usage": {"total_tokens": 700},
+                 "choices": [{"message": {"content": '{"action":"refuse","reason":"x"}'}}]}
+        brain = Brain(make_config(), post=lambda *a: reply)
+        brain.decide("a")
+        brain.decide("b")
+        self.assertEqual(brain.tokens_used, 1400)
+
+    def test_missing_usage_counts_the_worst_case(self):
+        self.assertEqual(usage_tokens({"choices": []}, 4100), 4100)
+        self.assertEqual(usage_tokens({"usage": {"total_tokens": "many"}}, 4100), 4100)
+        self.assertEqual(usage_tokens("not a dict", 4100), 4100)
+
+    def test_total_token_budget_is_enforced(self):
+        reply = {"usage": {"total_tokens": 600},
+                 "choices": [{"message": {"content": '{"action":"refuse","reason":"x"}'}}]}
+        brain = Brain(make_config(), post=lambda *a: reply)
+        brain.max_total_tokens = 1000
+        brain.decide("a")
+        brain.decide("b")  # 1200 used, over the limit
+        with self.assertRaises(RuntimeError) as ctx:
+            brain.decide("c")
+        self.assertIn("token budget", str(ctx.exception))
+        self.assertEqual(brain.calls, 2)
 
     def test_call_budget_is_enforced(self):
         brain = Brain(make_config(), post=lambda *a: {
