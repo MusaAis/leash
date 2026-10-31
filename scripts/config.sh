@@ -9,6 +9,7 @@ OWNER="${PREFIX}-owner.${NETWORK}"
 AGENT="${PREFIX}-agent.${NETWORK}"
 PAYEE="${PREFIX}-payee.${NETWORK}"
 ATTACKER="${PREFIX}-attacker.${NETWORK}"
+GHOST="${PREFIX}-ghost.${NETWORK}"   # intentionally never created
 WASM="contract/target/near/leash.wasm"
 GAS="30 Tgas"
 YOCTO="1 yoctoNEAR"
@@ -36,4 +37,41 @@ view() {
   [ -n "$args" ] || args='{}'
   near contract call-function as-read-only "$VAULT" "$1" json-args "$args" \
     network-config "$NETWORK" now
+}
+
+PASS=0
+FAIL=0
+
+# check LABEL EXPECTED GOT
+check() {
+  if [ "$3" = "$2" ]; then
+    PASS=$((PASS + 1)); echo "PASS  $1 (got $3)"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  $1 (expected $2, got ${3:-nothing})"
+  fi
+}
+
+last_bool() { grep -Eow 'true|false' | tail -1 || true; }
+first_number() { grep -Eo '[0-9]{6,}' | head -1 || true; }
+
+# expect_spend EXPECTED SIGNER JSON_ARGS LABEL
+expect_spend() {
+  local out got
+  out="$(send_tx "$2" spend "$3" "0 NEAR")"
+  [ -z "$out" ] || printf '%s\n' "$out"
+  got="$(printf '%s' "$out" | last_bool)"
+  check "$4" "$1" "$got"
+}
+
+vault_balance() { view get_available_balance 2>/dev/null | first_number; }
+
+agent_spent() {
+  view get_policy "{\"agent\":\"$AGENT\"}" 2>/dev/null \
+    | grep -Eo '"spent_in_window": *"[0-9]+"' | first_number
+}
+
+finish() {
+  echo
+  echo "Result: $PASS passed, $FAIL failed"
+  [ "$FAIL" -eq 0 ]
 }

@@ -14,13 +14,21 @@ Funds held by the vault contract, the integrity of each agent policy, and the ac
 | Outsider | Corrupt counters or spam events | Callers without a policy are reverted without state changes. |
 | Front-runner at deployment | Take ownership | `new` can only be called by the contract account, in the same batch as deployment. |
 
+## Agent runtime
+
+The agent account holds only gas money; funds stay in the vault. Model output is validated before it is sent, and the vault enforces the policy again, so a fully manipulated model cannot move funds outside the policy. See [agent runtime](agent.md).
+
 ## Known limitations
 
 - The daily window is fixed. Across a window boundary, up to twice the daily cap can be spent in a short time. Fund agents accordingly.
-- Spend is counted before the transfer settles. A failed transfer still consumes cap (fails closed).
+- Spend is counted before the transfer settles. A failed transfer still consumes cap (fails closed). Verified on testnet: a payment to an allowlisted account that does not exist emitted `spend_allowed`, the vault balance was restored by the refund, and the daily cap stayed consumed (see [testnet proof](testnet-proof.md)).
 - The owner key is a single point of control. Loss of the key locks funds. A guardian and two-step ownership transfer are planned.
 - A registered agent can raise the denied counter by sending denied requests. Applications that publish attack statistics should count attempts per session off-chain and not rely on the on-chain counter alone.
 - Only native NEAR is supported. Token support, cooldowns and human approval above a threshold are planned.
+
+## Exit path
+
+The owner can always call `withdraw`, also while agents or the whole vault are paused. Deleting the full-access keys removes the ability to upgrade the contract; it does not remove the owner's exit.
 
 ## Deployment requirements
 
