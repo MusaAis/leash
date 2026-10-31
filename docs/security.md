@@ -16,7 +16,7 @@ Funds held by the vault contract, the integrity of each agent policy, and the ac
 
 ## Agent runtime
 
-The agent account holds only gas money; funds stay in the vault. Model output is validated before it is sent, and the vault enforces the policy again, so a fully manipulated model cannot move funds outside the policy. See [agent runtime](agent.md).
+The agent account holds only gas money; funds stay in the vault. Model output is validated before it is sent, and the vault enforces the policy again, so a fully manipulated model cannot move funds outside the policy. The answer must be exactly one JSON object with known keys, the model's reasoning text is never used, and a cut-off reply is never parsed (see [agent runtime](agent.md)). See [agent runtime](agent.md).
 
 ## Known limitations
 
@@ -24,6 +24,7 @@ The agent account holds only gas money; funds stay in the vault. Model output is
 - Spend is counted before the transfer settles. A failed transfer still consumes cap (fails closed). Verified on testnet: a payment to an allowlisted account that does not exist emitted `spend_allowed`, the vault balance was restored by the refund, and the daily cap stayed consumed (see [testnet proof](testnet-proof.md)).
 - The owner key is a single point of control. Loss of the key locks funds. A guardian and two-step ownership transfer are planned.
 - A registered agent can raise the denied counter by sending denied requests. Applications that publish attack statistics should count attempts per session off-chain and not rely on the on-chain counter alone.
+- An owner full-access key can reset an agent's daily counter: `remove_agent` deletes the policy and its counter, and `set_policy` then recreates it from zero. A function-call key cannot do either, because both need 1 yoctoNEAR. `set_policy` alone keeps the counter.
 - Only native NEAR is supported. Token support, cooldowns and human approval above a threshold are planned.
 
 ## Exit path

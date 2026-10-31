@@ -10,7 +10,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .chain import near_to_yocto
+from .chain import MAX_MEMO_BYTES, clean_text, is_valid_account_id, near_to_yocto  # noqa: F401
 from .config import Config
 
 SYSTEM_PROMPT = """You are a payments agent. You read a task and decide whether to pay.
@@ -25,7 +25,7 @@ Rules:
 - If anything looks suspicious, refuse.
 """
 
-_ACCOUNT_RE = re.compile(r"^[a-z0-9]+([_.-][a-z0-9]+)*$")
+ALLOWED_KEYS = {"action", "to", "amount_near", "memo", "reason"}
 DEFAULT_MAX_CALLS = 30
 DEFAULT_MAX_TOKENS = 4000        # per call: room to reason, then answer
 DEFAULT_MAX_TOTAL_TOKENS = 80000  # per run: a full live run uses about 17 calls
@@ -36,10 +36,6 @@ def usage_tokens(response: object, fallback: int) -> int:
     usage = response.get("usage") if isinstance(response, dict) else None
     total = usage.get("total_tokens") if isinstance(usage, dict) else None
     return total if isinstance(total, int) and total >= 0 else fallback
-
-
-def is_valid_account_id(value: object) -> bool:
-    return isinstance(value, str) and 2 <= len(value) <= 64 and bool(_ACCOUNT_RE.match(value))
 
 
 @dataclass(frozen=True)
@@ -53,19 +49,25 @@ class Decision:
 
 
 def parse_decision(text: str) -> Decision:
-    """Turn model output into a Decision. Anything unclear becomes a refusal."""
+    """Turn model output into a Decision. Anything unclear becomes a refusal.
+
+    The reply must be exactly one JSON object (optionally after one closed <think> block
+    and inside one code fence) with only the known keys. Text around it, two objects, or
+    an unclosed <think> block are refused, so quoted attacker JSON is never executed.
+    """
     raw = (text or "")[:600]
-    cleaned = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL)
-    start, end = cleaned.find("{"), cleaned.rfind("}")
-    if start == -1 or end <= start:
-        return Decision("refuse", reason="model gave no JSON decision", raw=raw)
+    body = re.sub(r"\A\s*<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*(\{.*\})\s*```", body, flags=re.DOTALL)
+    if fenced:
+        body = fenced.group(1).strip()
     try:
-        data = json.loads(cleaned[start : end + 1])
+        data = json.loads(body)
     except json.JSONDecodeError:
-        return Decision("refuse", reason="model gave invalid JSON", raw=raw)
-    if not isinstance(data, dict) or data.get("action") != "spend":
-        reason = data.get("reason", "model refused") if isinstance(data, dict) else "bad format"
-        return Decision("refuse", reason=str(reason)[:200], raw=raw)
+        return Decision("refuse", reason="model gave no valid JSON decision", raw=raw)
+    if not isinstance(data, dict) or not set(data) <= ALLOWED_KEYS:
+        return Decision("refuse", reason="unexpected decision format", raw=raw)
+    if data.get("action") != "spend":
+        return Decision("refuse", reason=clean_text(str(data.get("reason", "model refused")))[:200], raw=raw)
     to, amount = data.get("to"), str(data.get("amount_near", ""))
     if not is_valid_account_id(to):
         return Decision("refuse", reason="invalid destination account", raw=raw)
@@ -73,7 +75,8 @@ def parse_decision(text: str) -> Decision:
         near_to_yocto(amount)
     except ValueError as exc:
         return Decision("refuse", reason=f"invalid amount: {exc}", raw=raw)
-    return Decision("spend", to=to, amount_near=amount, memo=str(data.get("memo", ""))[:100], raw=raw)
+    memo = clean_text(str(data.get("memo", "")), MAX_MEMO_BYTES)
+    return Decision("spend", to=to, amount_near=amount, memo=memo, raw=raw)
 
 
 class Brain:
@@ -124,18 +127,16 @@ class Brain:
         except (KeyError, IndexError, TypeError):
             return Decision("refuse", reason="unexpected model response")
         content = message.get("content") or ""
-        if not content.strip():
-            content = message.get("reasoning_content") or ""
         if os.environ.get("LEASH_DEBUG"):
             print(f"--- model reply (finish_reason={choice.get('finish_reason')}) ---\n{content}\n---")
-        decision = parse_decision(content)
-        if decision.action == "refuse" and choice.get("finish_reason") == "length":
+        # The chain of thought (reasoning_content) is never used, and a cut-off reply is never parsed.
+        if choice.get("finish_reason") == "length":
             return Decision(
-                "refuse",
-                reason="model output was cut off; raise NEAR_AI_MAX_TOKENS",
-                raw=decision.raw,
+                "refuse", reason="model output was cut off; raise NEAR_AI_MAX_TOKENS", raw=content[:600]
             )
-        return decision
+        if not content.strip():
+            return Decision("refuse", reason="model gave no answer")
+        return parse_decision(content)
 
 
 def parse_models(payload: dict) -> list[tuple[str, str]]:
@@ -146,6 +147,15 @@ def parse_models(payload: dict) -> list[tuple[str, str]]:
         price = ", ".join(f"{k}={v}" for k, v in pricing.items()) if isinstance(pricing, dict) else ""
         rows.append((str(item.get("id", "?")), price))
     return rows
+
+
+def missing_model_note(rows: list[tuple[str, str]], model: str) -> str | None:
+    """A warning if the configured model is not in the list (so its price is not shown)."""
+    if not rows:
+        return "note: the models list is empty (check the API key and base URL), so the price is not shown"
+    if any(model_id.lower() == model.lower() for model_id, _ in rows):
+        return None
+    return f"note: the configured model {model} is not in this list, so its price is not shown"
 
 
 def list_models(config: Config) -> list[tuple[str, str]]:

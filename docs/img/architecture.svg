@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 560" width="440" height="560" role="img" aria-labelledby="t d">
+<title id="t">LEASH architecture</title>
+<desc id="d">The owner funds the vault and sets policy. The agent asks the vault to spend. The vault pays the payee if the policy allows, otherwise it records a denial event.</desc>
+<defs>
+<marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#24292f"/></marker>
+<marker id="g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1a7f37"/></marker>
+<marker id="r" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#cf222e"/></marker>
+</defs>
+<rect x="0.75" y="0.75" width="438.5" height="558.5" rx="14" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+<rect x="20" y="24" width="190" height="84" rx="10" fill="#ddf4ff" stroke="#0969da" stroke-width="1.5"/>
+<text x="115" y="52" font-size="15" fill="#24292f" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Owner</text>
+<text x="115" y="74" font-size="12.5" fill="#57606a" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">sets the rules,</text>
+<text x="115" y="92" font-size="12.5" fill="#57606a" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">holds the exit</text>
+<rect x="230" y="24" width="190" height="84" rx="10" fill="#fff8c5" stroke="#bf8700" stroke-width="1.5"/>
+<text x="325" y="52" font-size="15" fill="#24292f" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">AI agent</text>
+<text x="325" y="74" font-size="12.5" fill="#57606a" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">decides with a NEAR AI</text>
+<text x="325" y="92" font-size="12.5" fill="#57606a" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Cloud model, holds no funds</text>
+<line x1="80" y1="108" x2="80" y2="206" stroke="#24292f" stroke-width="1.8" marker-end="url(#a)"/>
+<text x="92" y="146" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">fund, set policy,</text>
+<text x="92" y="162" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">pause, withdraw</text>
+<line x1="360" y1="108" x2="360" y2="206" stroke="#24292f" stroke-width="1.8" marker-end="url(#a)"/>
+<text x="348" y="146" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">spend(to, amount,</text>
+<text x="348" y="162" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">memo)</text>
+<rect x="20" y="210" width="400" height="176" rx="10" fill="#f6f8fa" stroke="#24292f" stroke-width="2"/>
+<text x="220" y="240" font-size="15" fill="#24292f" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">LEASH vault contract (NEAR)</text>
+<text x="40" y="268" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Holds the funds. The agent never does.</text>
+<text x="40" y="290" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Policy per agent: per-transaction cap, daily cap,</text>
+<text x="40" y="308" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">destination allowlist, pause flag</text>
+<text x="40" y="330" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Global kill switch for every agent</text>
+<text x="40" y="360" font-size="12.5" fill="#24292f" font-weight="bold" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Every spend() call is checked on-chain.</text>
+<line x1="115" y1="386" x2="115" y2="448" stroke="#1a7f37" stroke-width="1.8" marker-end="url(#g)"/>
+<text x="127" y="422" font-size="12.5" fill="#1a7f37" font-weight="bold" text-anchor="start" font-family="Helvetica, Arial, sans-serif">allowed</text>
+<line x1="325" y1="386" x2="325" y2="448" stroke="#cf222e" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#r)"/>
+<text x="337" y="422" font-size="12.5" fill="#cf222e" font-weight="bold" text-anchor="start" font-family="Helvetica, Arial, sans-serif">denied</text>
+<rect x="20" y="452" width="190" height="84" rx="10" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.5"/>
+<text x="115" y="480" font-size="15" fill="#24292f" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Payee</text>
+<text x="115" y="502" font-size="12.5" fill="#57606a" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">receives the transfer,</text>
+<text x="115" y="520" font-size="12.5" fill="#57606a" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">allowlisted accounts only</text>
+<rect x="230" y="452" width="190" height="84" rx="10" fill="#ffebe9" stroke="#cf222e" stroke-width="1.5"/>
+<text x="325" y="480" font-size="15" fill="#24292f" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">On-chain event log</text>
+<text x="325" y="502" font-size="12.5" fill="#57606a" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">spend_denied with a reason,</text>
+<text x="325" y="520" font-size="12.5" fill="#57606a" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">plus a denied counter</text>
+</svg>

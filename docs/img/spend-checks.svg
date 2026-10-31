@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 482" width="440" height="482" role="img" aria-labelledby="t d">
+<title id="t">Checks the vault runs on every spend call</title>
+<desc id="d">The vault evaluates nine conditions in order. The first one that applies denies the payment with the named reason. If none applies, the transfer is scheduled.</desc>
+<rect x="0.75" y="0.75" width="438.5" height="480.5" rx="14" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+<text x="220" y="34" font-size="15" fill="#24292f" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">What spend() checks, in order</text>
+<text x="220" y="54" font-size="12.5" fill="#57606a" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">The first check that applies stops the payment.</text>
+<rect x="20" y="76" width="400" height="32" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+<circle cx="40" cy="92" r="10" fill="#24292f"/>
+<text x="40" y="96.5" font-size="12" fill="#ffffff" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">0</text>
+<text x="58" y="96.5" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Caller has no policy?</text>
+<text x="408" y="96.5" font-size="12" fill="#57606a" font-weight="bold" text-anchor="end" font-family="Menlo, Consolas, monospace">reverts</text>
+<rect x="20" y="114" width="400" height="32" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+<circle cx="40" cy="130" r="10" fill="#24292f"/>
+<text x="40" y="134.5" font-size="12" fill="#ffffff" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">1</text>
+<text x="58" y="134.5" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Kill switch is on?</text>
+<text x="408" y="134.5" font-size="12" fill="#cf222e" font-weight="bold" text-anchor="end" font-family="Menlo, Consolas, monospace">all_paused</text>
+<rect x="20" y="152" width="400" height="32" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+<circle cx="40" cy="168" r="10" fill="#24292f"/>
+<text x="40" y="172.5" font-size="12" fill="#ffffff" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">2</text>
+<text x="58" y="172.5" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Memo over 128 bytes?</text>
+<text x="408" y="172.5" font-size="12" fill="#cf222e" font-weight="bold" text-anchor="end" font-family="Menlo, Consolas, monospace">memo_too_long</text>
+<rect x="20" y="190" width="400" height="32" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+<circle cx="40" cy="206" r="10" fill="#24292f"/>
+<text x="40" y="210.5" font-size="12" fill="#ffffff" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">3</text>
+<text x="58" y="210.5" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">This agent is paused?</text>
+<text x="408" y="210.5" font-size="12" fill="#cf222e" font-weight="bold" text-anchor="end" font-family="Menlo, Consolas, monospace">agent_paused</text>
+<rect x="20" y="228" width="400" height="32" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+<circle cx="40" cy="244" r="10" fill="#24292f"/>
+<text x="40" y="248.5" font-size="12" fill="#ffffff" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">4</text>
+<text x="58" y="248.5" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Amount is zero?</text>
+<text x="408" y="248.5" font-size="12" fill="#cf222e" font-weight="bold" text-anchor="end" font-family="Menlo, Consolas, monospace">zero_amount</text>
+<rect x="20" y="266" width="400" height="32" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+<circle cx="40" cy="282" r="10" fill="#24292f"/>
+<text x="40" y="286.5" font-size="12" fill="#ffffff" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">5</text>
+<text x="58" y="286.5" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Above the per-payment cap?</text>
+<text x="408" y="286.5" font-size="12" fill="#cf222e" font-weight="bold" text-anchor="end" font-family="Menlo, Consolas, monospace">over_per_tx_cap</text>
+<rect x="20" y="304" width="400" height="32" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+<circle cx="40" cy="320" r="10" fill="#24292f"/>
+<text x="40" y="324.5" font-size="12" fill="#ffffff" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">6</text>
+<text x="58" y="324.5" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Destination not allowlisted?</text>
+<text x="408" y="324.5" font-size="12" fill="#cf222e" font-weight="bold" text-anchor="end" font-family="Menlo, Consolas, monospace">not_allowlisted</text>
+<rect x="20" y="342" width="400" height="32" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+<circle cx="40" cy="358" r="10" fill="#24292f"/>
+<text x="40" y="362.5" font-size="12" fill="#ffffff" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">7</text>
+<text x="58" y="362.5" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Over the daily cap?</text>
+<text x="408" y="362.5" font-size="12" fill="#cf222e" font-weight="bold" text-anchor="end" font-family="Menlo, Consolas, monospace">over_daily_cap</text>
+<rect x="20" y="380" width="400" height="32" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+<circle cx="40" cy="396" r="10" fill="#24292f"/>
+<text x="40" y="400.5" font-size="12" fill="#ffffff" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">8</text>
+<text x="58" y="400.5" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">More than the vault can pay?</text>
+<text x="408" y="400.5" font-size="12" fill="#cf222e" font-weight="bold" text-anchor="end" font-family="Menlo, Consolas, monospace">insufficient_funds</text>
+<rect x="20" y="420" width="400" height="44" rx="10" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.5"/>
+<text x="220" y="440" font-size="13" fill="#1a7f37" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">None applies: the transfer is scheduled</text>
+<text x="220" y="456" font-size="12.5" fill="#1a7f37" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">and a spend_allowed event is recorded</text>
+</svg>

@@ -16,7 +16,10 @@ def load_env_file(path: Path) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+        value = value.strip()
+        if value[:1] not in ('"', "'"):
+            value = value.split(" #", 1)[0].strip()  # an unquoted value ends at an inline comment
+        os.environ.setdefault(key.strip(), value.strip('"').strip("'"))
 
 
 @dataclass(frozen=True)

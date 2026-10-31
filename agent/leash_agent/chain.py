@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+import unicodedata
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, localcontext
 from typing import Callable
@@ -16,6 +17,34 @@ RETURN_MARKER = "Function execution return value (printed to stdout):"
 EVENT_PREFIX = "EVENT_JSON:"
 # run_near joins stderr and stdout with this marker, so the parser can tell them apart.
 STDOUT_SENTINEL = "\n@@LEASH-STDOUT@@\n"
+MAX_MEMO_BYTES = 100  # the vault accepts 128; keep some room
+
+_ACCOUNT_RE = re.compile(r"[a-z0-9]+(?:[_.-][a-z0-9]+)*")
+_AMOUNT_RE = re.compile(r"[0-9]{1,9}(?:\.[0-9]{1,24})?")
+TX_ID_RE = re.compile(r"[1-9A-HJ-NP-Za-km-z]{43,44}")
+# A real id sits alone on its own line after the box characters. The echoed call arguments
+# (which include the memo) never match, so a hostile memo cannot fake the id.
+_TX_LINE_RE = re.compile(r"^[\s│├└─-]*Transaction ID:\s*([1-9A-HJ-NP-Za-km-z]{43,44})\s*$", re.M)
+_LINE_PREFIX_CHARS = " \t│├└─-"
+
+
+def is_valid_account_id(value: object) -> bool:
+    return isinstance(value, str) and 2 <= len(value) <= 64 and bool(_ACCOUNT_RE.fullmatch(value))
+
+
+def clean_text(text: str, max_bytes: int | None = None) -> str:
+    """Drop control characters and line breaks; optionally cut to at most `max_bytes` UTF-8 bytes."""
+    kept = "".join(ch for ch in str(text) if not unicodedata.category(ch).startswith(("C", "Z")) or ch == " ")
+    if max_bytes is None:
+        return kept
+    out, size = [], 0
+    for ch in kept:
+        width = len(ch.encode("utf-8"))
+        if size + width > max_bytes:
+            break
+        out.append(ch)
+        size += width
+    return "".join(out)
 
 
 class ChainError(Exception):
@@ -23,11 +52,14 @@ class ChainError(Exception):
 
 
 def near_to_yocto(amount: str) -> str:
-    """Convert a decimal NEAR amount to an exact yoctoNEAR string."""
+    """Convert a plain decimal NEAR amount (like 0.5) to an exact yoctoNEAR string."""
+    text = str(amount).strip()
+    if not _AMOUNT_RE.fullmatch(text):
+        raise ValueError("amount must be a plain decimal like 0.5")
     with localcontext() as ctx:
         ctx.prec = 80
         try:
-            value = Decimal(str(amount).strip())
+            value = Decimal(text)
         except InvalidOperation as exc:
             raise ValueError(f"not a number: {amount!r}") from exc
         if not value.is_finite() or value <= 0:
@@ -86,11 +118,12 @@ def parse_call_output(text: str) -> CallResult:
     if STDOUT_SENTINEL in text:
         text, stdout_part = text.rsplit(STDOUT_SENTINEL, 1)
     combined = text + "\n" + stdout_part
-    tx_match = re.search(r"Transaction ID:\s*(\S+)", combined)
+    tx_match = _TX_LINE_RE.search(combined)
     events: list[dict] = []
     for line in combined.splitlines():
-        if EVENT_PREFIX in line:
-            payload = line.split(EVENT_PREFIX, 1)[1].strip()
+        stripped = line.lstrip(_LINE_PREFIX_CHARS)
+        if stripped.startswith(EVENT_PREFIX):
+            payload = stripped[len(EVENT_PREFIX):].strip()
             try:
                 events.append(json.loads(payload))
             except json.JSONDecodeError:
@@ -135,7 +168,9 @@ class Vault:
 
     def spend(self, to: str, amount_near: str, memo: str = "") -> CallResult:
         """Ask the vault to pay. `returned` is True if scheduled, False if denied."""
-        payload = {"to": to, "amount": near_to_yocto(amount_near), "memo": memo}
+        if not is_valid_account_id(to):
+            raise ChainError("invalid destination account")
+        payload = {"to": to, "amount": near_to_yocto(amount_near), "memo": clean_text(memo, MAX_MEMO_BYTES)}
         args = [
             "near", "contract", "call-function", "as-transaction", self.config.vault,
             "spend", "json-args", json.dumps(payload),
