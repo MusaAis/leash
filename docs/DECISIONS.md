@@ -1,1 +1,3 @@
-# DECISIONS
+# Architecture decisions
+
+See docs/adr/.
