@@ -9,3 +9,5 @@ __pycache__/
 # Safety net: never commit private material
 PRIVATE*
 *private*
+TEAM.md
+REVIEW_LOG.md

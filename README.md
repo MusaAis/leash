@@ -64,24 +64,31 @@ Events follow an `EVENT_JSON:` log format with standard `leash`: `funded`, `with
 | Per-agent pause, global kill switch | Implemented |
 | Owner methods protected against function-call key leaks | Implemented |
 | Event log and on-chain allow/deny counters | Implemented |
-| Testnet and mainnet deployment | In progress |
-| Agent runtime, cross-chain payments, Arena, SDK | Planned |
+| Testnet deployment and scripted demo | Done (see [proof](docs/testnet-proof.md)) |
+| Mainnet deployment | Planned |
+| Agent runtime with NEAR AI Cloud decisions and attack suite | Implemented |
+| Cross-chain payments, Arena, SDK | Planned |
 
 ## Quick start
 
-Requirements: Rust (stable) and, for the wasm build, [cargo-near](https://github.com/near/cargo-near).
+Prerequisites:
+
+- Rust (stable) with the `wasm32-unknown-unknown` target, and `make`
+- Python 3.9 or newer (agent runtime and its tests; no third-party packages)
+- For the wasm build and the testnet demo only: [cargo-near](https://github.com/near/cargo-near), [near-cli-rs](https://github.com/near/near-cli-rs) and network access. See the [deployment guide](docs/deployment.md).
 
 ```
-make test    # run the contract tests
-make check   # format check, lint and tests
-make build   # build the wasm
+make test         # contract tests
+make test-agent   # agent tests
+make check        # format check, lint, contract and agent tests
 ```
 
-Expected result of `make test`: all tests pass.
+Expected result of `make test`: `test result: ok. 40 passed`.
+Expected result of `make test-agent`: `Ran 38 tests` followed by `OK`.
 
-## Testnet demo
+## Testnet demo (optional, needs network)
 
-A scripted run on NEAR testnet: the owner sets a policy, the agent pays an allowed payee, two attacks are blocked, the kill switch stops everything, and payments resume.
+A scripted run on NEAR testnet with a pass/fail check per step: the owner sets a policy, the agent pays an allowed payee, two attacks are blocked, the kill switch stops everything, and payments resume.
 
 ```
 make accounts-testnet   # create four faucet-funded testnet accounts
@@ -89,10 +96,23 @@ make deploy-testnet     # build, deploy and initialize the vault in one transact
 make demo-testnet       # run the scripted scenario
 ```
 
-Set `LEASH_PREFIX` to a unique name first, for example `export LEASH_PREFIX=myleash`. Allowed payments return `true`; blocked ones return `false` and emit a `spend_denied` event with the reason. Details: [deployment guide](docs/deployment.md). A recorded run with transaction links is in [docs/testnet-proof.md](docs/testnet-proof.md).
+Set `LEASH_PREFIX` to a unique name first, for example `export LEASH_PREFIX=myleash`, and use a fresh prefix for every run of the demo (the daily cap is 3 NEAR). The demo ends with `Result: N passed, 0 failed`. Allowed payments return `true`; blocked ones return `false` and emit a `spend_denied` event with the reason. Details: [deployment guide](docs/deployment.md). A recorded run with transaction links is in [docs/testnet-proof.md](docs/testnet-proof.md).
+
+## Agent runtime
+
+A Python agent (no third-party dependencies) asks a NEAR AI Cloud model whether to pay, then calls the vault. An attack suite tries eight kinds of manipulation against it.
+
+```
+cp .env.example .env     # set LEASH_PREFIX and NEAR_AI_API_KEY
+make agent-check         # configuration and vault counters
+make attack-testnet      # hijacked agent: what does the vault block?
+```
+
+Details: [agent runtime](docs/agent.md).
 
 ## Documentation
 
+- [Agent runtime](docs/agent.md)
 - [Deployment guide](docs/deployment.md)
 - [Security model](docs/security.md)
 - [Architecture decisions](docs/adr)
