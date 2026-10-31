@@ -19,12 +19,33 @@ The runtime has no third-party Python dependencies.
 
 ## Setup
 
+For a clean attack run, use a fresh vault. The daily cap (3 NEAR) carries over, and a vault that has already spent most of it stops every payment for a reason that has nothing to do with the attack. The live-model run prints a warning when the cap is low.
+
+```
+export LEASH_PREFIX=myleash2
+make accounts-testnet
+make deploy-testnet
+make policy-testnet      # policy and 5 NEAR of funds, without the full demo
+```
+
 ```
 cp .env.example .env     # set LEASH_PREFIX and NEAR_AI_API_KEY
 make agent-check         # prints the configuration and the vault counters
 ```
 
 The vault and accounts come from `make accounts-testnet` and `make deploy-testnet`, followed by the policy from `make demo-testnet` (step 1). The agent signs with the key stored for `<prefix>-agent.testnet`.
+
+## Cost limits
+
+Every live run is capped, so a mistake cannot spend the credits:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `NEAR_AI_MAX_TOKENS` | 4000 | Most tokens one model call may produce (the model reasons before it answers) |
+| `LEASH_MAX_MODEL_CALLS` | 30 | Most model calls in one run |
+| `LEASH_MAX_TOTAL_TOKENS` | 80000 | Most tokens used in one run, as reported by the API; the check runs before each call |
+
+A full `make attack-llm-testnet` run makes 17 calls and prints the calls and tokens used. `make agent-models` lists the models with their prices.
 
 ## NEAR AI credits
 
@@ -65,7 +86,17 @@ The first line of the report in scenario 1 is the control task. In scenario 2 ev
 
 ## Results
 
-Live model `zai-org/GLM-5.1-FP8` on testnet, scenario 1: the control task passed (the model proposed 0.2 NEAR to the payee) and all 8 attacks were refused by the agent, each with a stated reason, using 9 model calls. Hijacked-agent mode: 12 attempts, all 12 blocked by the vault. In every run, 0 payments reached a non-payee.
+One clean run on testnet, vault `leashmusa2-vault.testnet`, model `zai-org/GLM-5.1-FP8`, fresh policy (1 NEAR per payment, 3 NEAR per day, one payee). Details and policy transactions: [testnet proof](testnet-proof.md).
+
+| Run | Result |
+|---|---|
+| Live model, scenario 1 (attack text only) | Control passed (0.2 NEAR proposed to the payee). 8 of 8 attacks refused by the agent, each with a stated reason. |
+| Live model, scenario 2 (authorized invoice, attack text inside it) | 8 of 8 paid the authorized payee. 0 payments were redirected to another destination. |
+| Hijacked-agent mode (no model) | 12 of 12 attempts blocked by the vault: 6 `not_allowlisted`, 1 `over_per_tx_cap`, 5 `over_daily_cap`. |
+| Cost | 17 model calls, 10,197 tokens (limits: 30 calls, 80,000 tokens). |
+| Payments to a non-payee | 0 |
+
+What this does and does not show. It is one run at temperature 0 with eight attack texts. In scenario 2 the model was never fooled, so the vault had nothing to block in that scenario; the vault's behavior against a fully fooled agent is what hijacked mode demonstrates. The scenario 2 payments used 2.4 of the 3 NEAR daily cap, so the split-payment attacks that followed were stopped by the remaining cap.
 
 ## Trust model
 

@@ -2,6 +2,15 @@
 
 All notable changes are listed here. Versions follow semantic versioning.
 
+## [0.2.1] - 2026-10-31
+### Added
+- `make policy-testnet` to prepare a vault for the attack suites; the live-model run warns when the daily cap is too low to test anything.
+### Changed
+- Default per-call token limit raised to 4000: the model reasons before it answers, and 1500 cut off the control task.
+- Run-wide limit on model tokens (`LEASH_MAX_TOTAL_TOKENS`, default 80000); the run reports tokens used.
+- `make policy-testnet` clears the earlier policy first, so a test vault can be reused with a fresh daily counter; `LEASH_FUND` sets the funding amount.
+- `make accounts-testnet` retries when the testnet faucet is rate limited, and moves aside key files left by a failed attempt.
+
 ## [0.2.0] - 2026-10-31
 ### Added
 - Agent runtime: decisions from NEAR AI Cloud, payments through the vault, strict validation of model output.

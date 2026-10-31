@@ -160,6 +160,13 @@ class Vault:
             raise ChainError(f"no result from {method}. Output tail: {_tail(result.raw)}")
         return result.returned
 
+    def daily_headroom_yocto(self) -> int | None:
+        """Unused part of the agent's daily cap, or None if the agent has no policy."""
+        policy = self.view("get_policy", {"agent": self.config.agent})
+        if not isinstance(policy, dict):
+            return None
+        return max(0, int(policy["daily_cap"]) - int(policy["spent_in_window"]))
+
     def stats(self) -> tuple[int, int]:
         allowed, denied = self.view("get_stats")  # type: ignore[misc]
         return int(allowed), int(denied)

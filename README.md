@@ -84,7 +84,7 @@ make check        # format check, lint, contract and agent tests
 ```
 
 Expected result of `make test`: `test result: ok. 40 passed`.
-Expected result of `make test-agent`: `Ran 38 tests` followed by `OK`.
+Expected result of `make test-agent`: `Ran 44 tests` followed by `OK`.
 
 ## Testnet demo (optional, needs network)
 

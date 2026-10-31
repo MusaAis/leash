@@ -29,6 +29,10 @@ make demo-testnet
 
 Every command prints a transaction hash. Open it in a block explorer to see the emitted events.
 
+## Policy only
+
+`make policy-testnet` sets the agent policy (1 NEAR per payment, 3 NEAR per day, one payee) and funds the vault, without running the full demo. It removes any earlier policy first, so the agent's daily counter starts at zero and an old test vault can be reused. `LEASH_FUND="2 NEAR"` changes the amount (default 5 NEAR); `LEASH_FUND=0` skips funding. Use it on test vaults only.
+
 ## Before real funds
 
 Remove every full-access key from the vault account, so no one can bypass the policy or replace the contract:

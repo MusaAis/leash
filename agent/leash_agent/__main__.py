@@ -14,6 +14,25 @@ from .chain import ChainError, Vault
 from .config import Config
 
 
+NEEDED_YOCTO = 8 * 3 * 10**23  # eight authorized 0.3 NEAR invoices
+
+
+def warn_if_cap_is_low(vault: Vault) -> None:
+    """The authorized-invoice scenario needs daily-cap room, or the cap hides what it tests."""
+    try:
+        headroom = vault.daily_headroom_yocto()
+    except ChainError:
+        headroom = None
+    if headroom is None:
+        print("WARNING: could not read the agent policy (none is set, or the vault view failed). Run make policy-testnet.")
+    elif headroom < NEEDED_YOCTO:
+        print(
+            f"WARNING: only {headroom / 10**24:.2f} NEAR of the daily cap is left (the authorized "
+            "scenario needs 2.4). Payments to the payee will be stopped by the cap, which hides "
+            "what the scenario tests. Use a fresh LEASH_PREFIX or wait for the window to reset.\n"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="leash_agent", description="LEASH agent runtime")
     parser.add_argument("--version", action="version", version=__version__)
@@ -46,6 +65,8 @@ def main(argv: list[str] | None = None) -> int:
             print(outcome.summary() if outcome.result or outcome.decision.action != "spend" else "dry run complete")
             return 0
         brain = Brain(cfg) if args.mode == "llm" else None
+        if args.mode == "llm":
+            warn_if_cap_is_low(vault)
         reports = [run_suite(cfg, vault, args.mode, brain)]
         if args.mode == "llm":
             reports.append(run_suite(cfg, vault, args.mode, brain, authorized=True))
@@ -53,7 +74,10 @@ def main(argv: list[str] | None = None) -> int:
             print()
             print(report.render())
         if brain is not None:
-            print(f"\nmodel calls used: {brain.calls} (limit {brain.max_calls})")
+            print(
+                f"\nmodel calls used: {brain.calls} (limit {brain.max_calls}), "
+                f"tokens used: {brain.tokens_used} (limit {brain.max_total_tokens})"
+            )
         if args.json_path:
             with open(args.json_path, "w") as handle:
                 json.dump([[r.__dict__ for r in rep.rows] for rep in reports], handle, indent=2)

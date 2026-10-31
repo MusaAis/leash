@@ -1,4 +1,4 @@
-.PHONY: test build fmt lint check test-agent agent-models agent-dry accounts-testnet deploy-testnet demo-testnet lock-vault-testnet agent-check agent-run attack-testnet attack-llm-testnet
+.PHONY: test build fmt lint check test-agent agent-models agent-dry accounts-testnet deploy-testnet demo-testnet lock-vault-testnet policy-testnet agent-check agent-run attack-testnet attack-llm-testnet
 
 test:
 	cd contract && cargo test
@@ -28,6 +28,9 @@ demo-testnet:
 
 lock-vault-testnet:
 	scripts/lock-vault.sh
+
+policy-testnet:
+	scripts/policy-testnet.sh
 
 agent-check:
 	cd agent && python3 -m leash_agent check
