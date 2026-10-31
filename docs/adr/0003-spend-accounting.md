@@ -2,6 +2,6 @@
 
 **Context.** Daily spend must be enforced across many calls.
 
-**Decision.** Spend is counted before the transfer is scheduled and is not rolled back if the transfer fails. The daily window is a fixed 24 hours starting at the first spend after the previous window ended.
+**Decision.** Spend is counted before the transfer is scheduled and is not rolled back if the transfer fails. The daily window is fixed at 24 hours, starting at the first spend after the previous window ended.
 
-**Consequences.** Accounting fails closed. Rollback on failed transfers is a candidate improvement.
+**Consequences.** Accounting fails closed. A fixed window allows up to twice the daily cap across a window boundary. Operators should size funds for that case. Rollback on failed transfers and a stricter window are candidate improvements.

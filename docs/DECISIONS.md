@@ -1,3 +1,3 @@
 # Architecture decisions
 
-See docs/adr/.
+See [docs/adr](adr).
