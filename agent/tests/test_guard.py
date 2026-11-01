@@ -17,6 +17,11 @@ class Guard(unittest.TestCase):
                 check("mainnet", ["v.near"], env)
         self.assertEqual(check("mainnet", ["v.near"], MAIN), ["v.near"])
 
+    def test_only_the_exact_value_1_switches_mainnet_on(self):
+        for value in ("0", "false", "no", "", " ", "1 ", "true", "yes"):
+            with self.assertRaises(GuardError, msg=repr(value)):
+                check("mainnet", ["v.near"], {"LEASH_ALLOW_MAINNET": value})
+
     def test_mainnet_refuses_testnet_accounts_and_accepts_the_rest(self):
         with self.assertRaises(GuardError):
             check("mainnet", ["v.near", "x.testnet"], MAIN)
@@ -62,3 +67,19 @@ class GuardCli(unittest.TestCase):
     def test_it_needs_no_env_file(self):
         code, _, _ = self.run_cli(["guard", "--network", "testnet", "a.testnet"], {})
         self.assertEqual(code, 0)
+
+
+class NonTestnetFlag(unittest.TestCase):
+    def pay(self, value):
+        env = {"LEASH_ALLOW_NON_TESTNET": value} if value is not None else {}
+        err = io.StringIO()
+        cfg = mock.Mock(network="mainnet")
+        with mock.patch.dict("os.environ", env, clear=True), mock.patch.object(cli.Config, "from_env", return_value=cfg), contextlib.redirect_stderr(err):
+            code = cli.main(["attack"])
+        return code, err.getvalue()
+
+    def test_any_value_but_1_still_refuses_a_paying_command_off_testnet(self):
+        for value in (None, "0", "false", "", " "):
+            code, err = self.pay(value)
+            self.assertEqual(code, 1, msg=repr(value))
+            self.assertIn("LEASH_ALLOW_NON_TESTNET", err)

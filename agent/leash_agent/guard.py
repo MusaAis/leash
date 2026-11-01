@@ -19,7 +19,7 @@ def check(network: str, accounts: Iterable[str], env: Mapping[str, str] | None =
     env = os.environ if env is None else env
     accounts = list(accounts)
     if network == "mainnet":
-        if not env.get("LEASH_ALLOW_MAINNET"):
+        if env.get("LEASH_ALLOW_MAINNET") != "1":
             raise GuardError("mainnet needs LEASH_ALLOW_MAINNET=1 in the process environment, set for this one command")
     elif network != "testnet":
         raise GuardError(f"unknown network {network!r}: only testnet and mainnet are known")

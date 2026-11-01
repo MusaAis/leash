@@ -69,6 +69,8 @@ class Storage(unittest.TestCase):
         self.assertIn("no transaction, no key", out.getvalue())
         self.assertIn(f"storage_balance_of {'d' * 64}: null", out.getvalue())
         self.assertNotIn("c" * 64, out.getvalue())
+        self.assertNotIn("r.near", out.getvalue())
+        self.assertIn("<REFUND_TO>", out.getvalue())
 
 
 if __name__ == "__main__":

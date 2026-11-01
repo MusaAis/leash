@@ -106,7 +106,7 @@ def wrap_storage(accounts: list[str], post=None) -> int:
     results = check_storage(list(dict.fromkeys(accounts)), **({"post": post} if post else {}))
     print(f"read-only checks on wrap.near at {iso(utc_now())} (no transaction, no key):")
     for name, value in results.items():
-        print(f"{name}: {json.dumps(value)}")
+        print(scrub(f"{name}: {json.dumps(value)}"))
     return 0
 
 
@@ -171,7 +171,7 @@ def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, mod
         return 1
     vault = vault or Vault(cfg)
     pays = (args.command == "attack") or (args.command == "run" and not args.dry_run)
-    if pays and cfg.network != "testnet" and not os.environ.get("LEASH_ALLOW_NON_TESTNET"):
+    if pays and cfg.network != "testnet" and os.environ.get("LEASH_ALLOW_NON_TESTNET") != "1":
         print(
             f"error: this command can pay real funds and the network is {cfg.network}, not testnet. "
             "Set LEASH_ALLOW_NON_TESTNET=1 only if that is intended.",
