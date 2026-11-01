@@ -20,7 +20,8 @@ All notable changes are listed here. Versions follow semantic versioning.
 - Docs: the Chain Signatures row is marked roadmap, the refund account text matches the real flow, an unverified fee remark is removed, and "checked against the live API" no longer reads as "deployed on mainnet".
 - A wet quote's deposit address must be 64 lowercase hex characters (the shape of both real answers); any other shape is refused. An echoed deadline different from the asked one is refused, and the guardian log keeps both. Observations from two answers, see `docs/intents.md`.
 - Docs: the model id `zai-org/GLM-5.1-FP8` is named as the requested model, an alias on 2026-11-01; which model answered earlier runs is not recorded.
-- Tests: 200 agent tests (161 before). The redaction tests use their own temporary directory.
+- `python3 -m leash_agent guard --network <testnet|mainnet> ACCOUNT...`: one shared check for every account in a command. Mainnet needs `LEASH_ALLOW_MAINNET=1` in the process environment (never read from `.env`) and refuses `.testnet` accounts; testnet refuses named accounts that do not end in `.testnet` (64-hex implicit accounts pass on both). Prints every account, exits 1 on a refusal. Not yet used by the scripts.
+- Tests: 208 agent tests (161 before). The redaction tests use their own temporary directory.
 
 ## [0.3.0] - 2026-11-01
 ### Added

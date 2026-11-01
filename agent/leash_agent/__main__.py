@@ -13,6 +13,7 @@ from .attacks import build_attacks, run_suite
 from .brain import Brain, list_models, missing_model_note
 from .chain import ChainError, Vault, near_to_yocto
 from .config import Config, EnvFileError
+from .guard import GuardError, check as guard_check
 from .guardian import EnvRoutes, Guardian, GuardianLog
 from .intents import IntentsError, OneClick, QuoteRejected, find_tokens, iso, utc_now
 from .preflight import PolicySim, precheck
@@ -147,9 +148,21 @@ def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, mod
     wet.add_argument("--yes", action="store_true", help="confirm that this asks for a real quote")
     ws = sub.add_parser("wrap-storage", help="read-only: wrap.near storage bounds and balances")
     ws.add_argument("--account", action="append", default=[], help="extra account to check (repeatable)")
+    gd = sub.add_parser("guard", help="check that every account fits the network (mainnet needs LEASH_ALLOW_MAINNET=1)")
+    gd.add_argument("--network", required=True)
+    gd.add_argument("accounts", nargs="+")
     sig = sub.add_parser("agent-signature", help="F-1: which signature kind does the gateway give a model's answer?")
     sig.add_argument("--model", action="append", default=[], help="model id (repeatable; default: the configured model and z-ai/glm-5.3)")
     args = parser.parse_args(argv)
+
+    if args.command == "guard":  # pure check: no .env, no network, never reads LEASH_ALLOW_MAINNET from a file
+        try:
+            accounts = guard_check(args.network, args.accounts)
+        except GuardError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(f"network {args.network}: " + ", ".join(accounts) + "\nOK")
+        return 0
 
     try:
         cfg = cfg or Config.from_env()

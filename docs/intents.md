@@ -49,7 +49,7 @@ Observations from two answers, not documented behavior of the service.
 
 - Both answers hold a deposit address that is a 64-character lowercase hex implicit account. The guardian now refuses any other shape for a wet quote (fail closed). The rule is relaxed only by a decision, after another real sample.
 - In both, the quote's `deadline` is exactly 3 days after the deadline we asked for (20 minutes), so the address stays active for 3 days. The echoed `quoteRequest.deadline` equalled the asked one; the guardian refuses a different one, and logs both. The asked deadline is the one the guardian uses for its "one open quote" rule.
-- The platform fee entry in both has one more key, `limitOrderId`, set to `null`. The guardian accepts it only as `null`.
+- The platform fee entry in both wet answers has one more key, `limitOrderId`, set to `null`; a dry answer (2026-11-01, 0.1 NEAR) has the entry without that key. The guardian accepts both, and `limitOrderId` only as `null`. The dry answer echoed the asked deadline too.
 - 0.1 NEAR gave 0.425652 USDC (minimum 0.421395) in the first and 0.421467 USDC (minimum 0.417252) in the second; estimate 24 seconds, `withdrawFee` 2400 in both. Nothing was deposited. The probe stops after 3 wet quotes in the log.
 
 ## Preparing real payments (written and unit-tested)
