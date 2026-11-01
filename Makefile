@@ -1,5 +1,6 @@
 SAMPLES ?= 1
-.PHONY: test build fmt lint check check-docs test-agent agent-models agent-dry accounts-testnet deploy-testnet demo-testnet lock-vault-testnet policy-testnet agent-check agent-run attack-testnet attack-llm-testnet
+AMOUNT ?= 0.5
+.PHONY: test build fmt lint check check-docs test-agent agent-models agent-dry accounts-testnet deploy-testnet demo-testnet lock-vault-testnet policy-testnet agent-check agent-run attack-testnet attack-llm-testnet intents-tokens intents-dry
 
 test:
 	cd contract && cargo test
@@ -53,3 +54,9 @@ attack-testnet:
 
 attack-llm-testnet:
 	cd agent && python3 -m leash_agent attack --mode llm --samples $(SAMPLES)
+
+intents-tokens:
+	cd agent && python3 -m leash_agent intents-tokens $(if $(SYMBOL),--symbol $(SYMBOL)) $(if $(CHAIN),--chain $(CHAIN))
+
+intents-dry:
+	cd agent && python3 -m leash_agent intents-dry --amount $(AMOUNT)

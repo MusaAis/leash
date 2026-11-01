@@ -22,12 +22,13 @@ The agent account holds only gas money; funds stay in the vault. Model output is
 
 - The daily window is fixed. Across a window boundary, up to twice the daily cap can be spent in a short time. Fund agents accordingly.
 - Spend is counted before the transfer settles. A failed transfer still consumes cap (fails closed). Verified on testnet: a payment to an allowlisted account that does not exist emitted `spend_allowed`, the vault balance was restored by the refund, and the daily cap stayed consumed (see [testnet proof](testnet-proof.md)).
-- The owner key is a single point of control. Loss of the key locks funds. A guardian and two-step ownership transfer are planned.
+- The owner key is a single point of control. The owner is fixed at deploy and there is no ownership transfer; losing the key locks the funds. An offline backup key on the owner account is the recovery practice.
 - A registered agent can raise the denied counter by sending denied requests. Applications that publish attack statistics should count attempts per session off-chain and not rely on the on-chain counter alone.
 - An owner full-access key can reset an agent's daily counter: `remove_agent` deletes the policy and its counter, and `set_policy` then recreates it from zero. A function-call key cannot do either, because both need 1 yoctoNEAR. `set_policy` alone keeps the counter.
 - The daily model budget is a file read and written by one process at a time; two runs started together can both pass the check. A service with several processes needs a shared counter.
 - Prompt-injection results are evidence about one model and ten attack texts, not a guarantee. The vault policy, not the model, is the security boundary.
-- Only native NEAR is supported. Token support, cooldowns and human approval above a threshold are planned.
+- Only native NEAR is spent by the vault. Token and cross-chain payments are not part of this release.
+- The guardian's quote checks run off the chain and move no funds in this release. See [intents](intents.md).
 
 ## Exit path
 

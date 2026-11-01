@@ -15,6 +15,7 @@ task or message -> model (NEAR AI Cloud) -> decision -> vault.spend() -> allowed
 | `preflight.py` | Checks the vault before an attack run and predicts what the vault will answer. |
 | `agent.py` | The loop: decide, then call the vault. |
 | `attacks.py` | Attack suite with two modes (below). |
+| `intents.py`, `guardian.py` | 1Click quote client and the guardian that checks quotes. See [intents](intents.md). |
 
 The runtime has no third-party Python dependencies.
 
