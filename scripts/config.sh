@@ -51,6 +51,8 @@ check() {
   fi
 }
 
+# last_bool and first_number read the CLI output of OUR OWN scripted calls, where every memo is fixed text.
+# Never use them on output that can contain text from a user, a model or an attacker (a memo could fake a result).
 last_bool() { grep -Eow 'true|false' | tail -1 || true; }
 first_number() { grep -Eo '[0-9]{6,}' | head -1 || true; }
 

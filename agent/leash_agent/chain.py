@@ -78,6 +78,11 @@ class CallResult:
     raw: str = ""
 
     @property
+    def allowed_event(self) -> bool:
+        """True if the vault logged a `spend_allowed` event for this call."""
+        return any(event.get("event") == "spend_allowed" for event in self.events)
+
+    @property
     def denial_reason(self) -> str | None:
         for event in reversed(self.events):
             if event.get("event") == "spend_denied":
@@ -138,6 +143,19 @@ def _tail(text: str, size: int = 600) -> str:
     return text.strip()[-size:]
 
 
+@dataclass(frozen=True)
+class Snapshot:
+    """The vault state that decides what a payment by the agent can do (amounts in yoctoNEAR)."""
+
+    per_tx_cap: int
+    daily_cap: int
+    spent: int
+    allowlist: tuple[str, ...]
+    agent_paused: bool
+    all_paused: bool
+    balance: int
+
+
 Runner = Callable[[list[str]], str]
 
 
@@ -195,12 +213,31 @@ class Vault:
             raise ChainError(f"no result from {method}. Output tail: {_tail(result.raw)}")
         return result.returned
 
-    def daily_headroom_yocto(self) -> int | None:
-        """Unused part of the agent's daily cap, or None if the agent has no policy."""
-        policy = self.view("get_policy", {"agent": self.config.agent})
+    def snapshot(self) -> Snapshot:
+        """Read the agent's policy, the pause flag and the vault balance (three views)."""
+        try:
+            policy = self.view("get_policy", {"agent": self.config.agent})
+        except ChainError as exc:
+            raise ChainError(
+                f"cannot read the policy of {self.config.agent} in {self.config.vault} "
+                f"(is one set? run make policy-testnet): {exc}"
+            ) from exc
         if not isinstance(policy, dict):
-            return None
-        return max(0, int(policy["daily_cap"]) - int(policy["spent_in_window"]))
+            raise ChainError(f"{self.config.agent} has no policy in {self.config.vault}; run make policy-testnet")
+        paused_all = self.view("is_paused_all")
+        balance = self.view("get_available_balance")
+        try:
+            return Snapshot(
+                per_tx_cap=int(policy["per_tx_cap"]),
+                daily_cap=int(policy["daily_cap"]),
+                spent=int(policy["spent_in_window"]),
+                allowlist=tuple(str(a) for a in policy["allowlist"]),
+                agent_paused=bool(policy["paused"]),
+                all_paused=paused_all is True,
+                balance=int(balance),  # type: ignore[arg-type]
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ChainError(f"unexpected vault view output: {exc!r}") from exc
 
     def stats(self) -> tuple[int, int]:
         allowed, denied = self.view("get_stats")  # type: ignore[misc]

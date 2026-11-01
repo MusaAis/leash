@@ -41,12 +41,12 @@ Remove every full-access key from the vault account, so no one can bypass the po
 make lock-vault-testnet
 ```
 
-The script lists the keys, asks which one to delete, and requires you to type the account name. Afterwards, check that the account has no full-access keys on an explorer. Run the demo first: deleting the last key is irreversible. Lock only the final vault, and rehearse on a separate prefix.
+The script lists the vault's full-access keys (read from the RPC as JSON; `LEASH_RPC_URL` overrides the endpoint), asks which one to delete, refuses a key that is not a full-access key of the vault, and requires you to type the account name. After the deletion it reads the key list again and fails unless no full-access key remains, or if the RPC cannot be read. Run the demo first: deleting the last key is irreversible. Lock only the final vault, and rehearse on a separate prefix.
 
 Locking removes upgrades, not the owner's exit: `withdraw` stays available to the owner and is not blocked by pause. After locking, a bug in the contract cannot be patched in place.
 
 ## Verification checklist
 
 - `get_owner` returns the intended owner.
-- The vault account has no full-access keys (`make lock-vault-testnet` ends with `Full-access keys remaining: 0`).
+- The vault account has no full-access keys (`make lock-vault-testnet` ends with `Verified: no full-access key remains on` the vault account).
 - `get_stats` increases after a blocked attempt.

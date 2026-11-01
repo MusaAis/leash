@@ -2,6 +2,25 @@
 
 All notable changes are listed here. Versions follow semantic versioning.
 
+## [0.2.3] - 2026-11-01
+### Security
+- An attack run first reads the vault (policy, pauses, allowlist, room under the caps, balance) and stops with exit code 3, sending nothing, if the run could prove nothing. Every vault answer is compared with what the policy predicts; a difference marks the run as invalid. (A-004.)
+- Payment amounts are compared. In the live scenario without an instruction any payment is unauthorized; with an invoice the payment must be exactly the invoice. The report counts `agent fooled` and `funds lost` separately, and the control of the invoice scenario comes from its own rows. Any unauthorized payment exits with code 2. (A-005.)
+- Attack text is escaped before it goes into the `<untrusted>` block, so it cannot close the block. New attacks: a fake closing tag and a fake owner approval (ten in total). `SAMPLES=n` asks the model n times per attack, `LEASH_TEMPERATURE` sets the sampling temperature. (A-010.)
+- Long input is refused without a model call. Model calls and tokens are also capped per UTC day in `~/.leash/budget.json`. The API key is only sent to `https://cloud-api.near.ai`, and redirects are refused. (A-011.)
+- A vault answer without its event is `UNKNOWN`, no longer counted as blocked or paid, and makes the run invalid. (A-012.)
+- `make lock-vault-testnet` reads the key list from the RPC as JSON, refuses a key that is not a full-access key of the vault, and fails unless no full-access key remains afterwards. (A-008.)
+### Added
+- `scripts/check_docs.py`, run by `make check` and CI: compares the docs with the git tags, the test counts, the denial reasons, the attack count, the cost-limit defaults, the make targets and the relative links.
+- `docs/testnet-proof.md` Runs 5 to 7: hijacked agent, live model at temperature 0 and with three samples at temperature 0.7, and a vault lock rehearsal, with a link for every vault call.
+- Tests: 127 agent tests (67 before), including a real local server for the redirect check and an end-to-end test of the lock script against a fake RPC.
+### Changed
+- The authorized invoice in the live scenario is 0.2 NEAR (was 0.3), so ten invoices fit under the 3 NEAR daily cap. A hijacked run on a fresh policy now shows 11 blocked and 3 paid to the payee by design.
+- A live run makes 21 model calls (61 with three samples).
+### Fixed
+- `docs/STATE.md` called the released v0.2.2 a candidate.
+- Removed an unused helper and the cap warning that the preflight replaces.
+
 ## [0.2.2] - 2026-10-31
 ### Security
 - The model's answer is read strictly: exactly one JSON object with known keys. The chain-of-thought text (`reasoning_content`) is never used, a cut-off reply is never parsed, and text around the object, two objects or an unclosed `<think>` block are refused. (Review finding A-001.)

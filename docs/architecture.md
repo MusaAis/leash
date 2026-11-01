@@ -12,7 +12,8 @@ LEASH separates the ability to decide from the ability to pay. The agent decides
 |---|---|---|
 | Vault contract | `contract/src/lib.rs` | Holds the funds, stores one policy per agent, checks every `spend`, emits events |
 | Agent runtime | `agent/leash_agent/` | Asks a model whether to pay, validates the answer, calls `spend` as the agent account |
-| Attack suite | `agent/leash_agent/attacks.py` | Sends eight kinds of manipulation through the agent or straight to the vault |
+| Attack suite | `agent/leash_agent/attacks.py` | Sends ten kinds of manipulation through the agent or straight to the vault |
+| Preflight | `agent/leash_agent/preflight.py` | Checks the vault before an attack run and predicts its answers |
 | Scripts | `scripts/` | Create accounts, deploy, set a policy, run the asserted demo, lock the vault |
 
 ## Accounts

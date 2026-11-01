@@ -16,7 +16,7 @@ Funds held by the vault contract, the integrity of each agent policy, and the ac
 
 ## Agent runtime
 
-The agent account holds only gas money; funds stay in the vault. Model output is validated before it is sent, and the vault enforces the policy again, so a fully manipulated model cannot move funds outside the policy. The answer must be exactly one JSON object with known keys, the model's reasoning text is never used, and a cut-off reply is never parsed (see [agent runtime](agent.md)). See [agent runtime](agent.md).
+The agent account holds only gas money; funds stay in the vault. Model output is validated before it is sent, and the vault enforces the policy again, so a fully manipulated model cannot move funds outside the policy. The answer must be exactly one JSON object with known keys, the model's reasoning text is never used, and a cut-off reply is never parsed (see [agent runtime](agent.md)). Outside text is escaped before it is put in the model's untrusted block, long input is refused, the API key is only sent to the NEAR AI Cloud host and redirects are refused, and model use is capped per run and per UTC day.
 
 ## Known limitations
 
@@ -25,6 +25,8 @@ The agent account holds only gas money; funds stay in the vault. Model output is
 - The owner key is a single point of control. Loss of the key locks funds. A guardian and two-step ownership transfer are planned.
 - A registered agent can raise the denied counter by sending denied requests. Applications that publish attack statistics should count attempts per session off-chain and not rely on the on-chain counter alone.
 - An owner full-access key can reset an agent's daily counter: `remove_agent` deletes the policy and its counter, and `set_policy` then recreates it from zero. A function-call key cannot do either, because both need 1 yoctoNEAR. `set_policy` alone keeps the counter.
+- The daily model budget is a file read and written by one process at a time; two runs started together can both pass the check. A service with several processes needs a shared counter.
+- Prompt-injection results are evidence about one model and ten attack texts, not a guarantee. The vault policy, not the model, is the security boundary.
 - Only native NEAR is supported. Token support, cooldowns and human approval above a threshold are planned.
 
 ## Exit path
@@ -33,7 +35,7 @@ The owner can always call `withdraw`, also while agents or the whole vault are p
 
 ## Deployment requirements
 
-Deploy and initialize in one batch. Delete all full-access keys on the vault account before it holds real funds, and verify on an explorer.
+Deploy and initialize in one batch. Delete all full-access keys on the vault account before it holds real funds. `make lock-vault-testnet` deletes one key and then checks the key list from the RPC; it was rehearsed on testnet (see [testnet proof](testnet-proof.md), Run 7).
 
 ## Reporting
 
