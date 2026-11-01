@@ -86,6 +86,11 @@ class VerifyQuote(unittest.TestCase):
             "deposit address empty": good_response(req, quote__depositAddress=""),
             "deposit address is the vault": good_response(req, quote__depositAddress="v.near"),
             "deposit address is the recipient": good_response(req, quote__depositAddress="0xrecipient"),
+            "deposit address is a named account": good_response(req, quote__depositAddress="deposit.near"),
+            "deposit address in upper case": good_response(req, quote__depositAddress="A" * 64),
+            "deposit address one character short": good_response(req, quote__depositAddress="a" * 63),
+            "echoed deadline changed": good_response(req, echo__deadline=iso(NOW + datetime.timedelta(minutes=19))),
+            "echoed deadline garbage": good_response(req, echo__deadline="soon"),
             "memo needed": good_response(req, quote__depositMemo="123"),
             "deadline in the past": good_response(req, quote__deadline=iso(NOW - datetime.timedelta(minutes=1))),
             "deadline too far": good_response(req, quote__deadline=iso(NOW + datetime.timedelta(days=5))),
@@ -145,6 +150,12 @@ class VerifyQuote(unittest.TestCase):
         for response in (None, [], {}, {"quote": {}}, {"quote": []}, {"quote": {"amountIn": "1"}, "quoteRequest": None}):
             with self.assertRaises(QuoteRejected):
                 verify_quote_response(req, response, now=NOW)
+
+    def test_an_answer_without_an_echoed_deadline_is_accepted(self):
+        req = make_request()
+        answer = good_response(req)
+        answer["quoteRequest"].pop("deadline", None)
+        self.assertEqual(verify_quote_response(req, answer, now=NOW).deposit_address, DEPOSIT)
 
     def test_a_dry_quote_with_an_address_is_rejected(self):
         req = make_request(dry=True)

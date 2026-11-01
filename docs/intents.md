@@ -43,11 +43,14 @@ Expected: `intents-dry` ends with `verified: amountIn=... amountOut=... minAmoun
 
 Prices move between calls (two answers for 0.5 NEAR gave 2177761 and 2184717). Every size passed the guardian's checks.
 
-## One real quote, never paid (2026-11-01, 0.1 NEAR)
+## Two real quotes, never paid (2026-11-01, 0.1 NEAR each)
 
-- The answer holds a deposit address: a 64-hex implicit account (not a named account). The quote's `deadline` is exactly 3 days after the deadline we asked for (20 minutes), so the address stays active for 3 days. The asked deadline is the one the guardian uses for its "one open quote" rule.
-- The platform fee entry in this answer has one more key, `limitOrderId`, set to `null`. The guardian accepts it only as `null`.
-- 0.1 NEAR gave 0.425652 USDC (minimum 0.421395), estimate 24 seconds, `withdrawFee` 2400. Nothing was deposited.
+Observations from two answers, not documented behavior of the service.
+
+- Both answers hold a deposit address that is a 64-character lowercase hex implicit account. The guardian now refuses any other shape for a wet quote (fail closed). The rule is relaxed only by a decision, after another real sample.
+- In both, the quote's `deadline` is exactly 3 days after the deadline we asked for (20 minutes), so the address stays active for 3 days. The echoed `quoteRequest.deadline` equalled the asked one; the guardian refuses a different one, and logs both. The asked deadline is the one the guardian uses for its "one open quote" rule.
+- The platform fee entry in both has one more key, `limitOrderId`, set to `null`. The guardian accepts it only as `null`.
+- 0.1 NEAR gave 0.425652 USDC (minimum 0.421395) in the first and 0.421467 USDC (minimum 0.417252) in the second; estimate 24 seconds, `withdrawFee` 2400 in both. Nothing was deposited. The probe stops after 3 wet quotes in the log.
 
 ## Preparing real payments (written and unit-tested)
 
@@ -56,7 +59,7 @@ make intents-wet-probe        # one real quote of 0.1 NEAR: prints the deposit a
 make wrap-storage             # read-only: wrap.near storage bounds and the storage balance of the probe's address (ACCOUNT=x.near adds more)
 ```
 
-The probe never deposits. Never send funds to the address it prints. The storage check sends no transaction and holds no key; it reads `LEASH_RPC_URL` (default: a public node from the NEAR docs list). Read on 2026-11-01: the storage deposit of `wrap.near` is 0.00125 NEAR (minimum and maximum are the same).
+The probe never deposits. Never send funds to the address it prints. The storage check sends no transaction and holds no key; it reads `LEASH_RPC_URL` (default: a public node from the NEAR docs list). Read on 2026-11-01: the storage deposit of `wrap.near` is 0.00125 NEAR (minimum and maximum are the same). The storage balance of both deposit addresses above was `null` (not registered), so a fresh deposit address is not registered there. The planned payment batch registers it first (design, untested).
 
 ## Not done in this release
 

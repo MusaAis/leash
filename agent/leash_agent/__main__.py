@@ -88,7 +88,7 @@ def intents_wet_probe(cfg, amount_near, oneclick) -> int:
     print(f"\nverified: amountIn={v.amount_in} amountOut={v.amount_out} minAmountOut={v.min_amount_out} timeEstimate={v.time_estimate}")
     print(f"deposit address: {v.deposit_address}\nformat: {address_kind(v.deposit_address)}\naddress active until: {iso(v.deadline)}")
     print(f"\nraw response (recipient hidden):\n{redact(response, recipient)}")
-    print("\nDO NOT SEND ANY FUNDS TO THIS ADDRESS. The quote expires and nothing was deposited.")
+    print("\nDO NOT SEND ANY FUNDS TO THIS ADDRESS. Nothing was deposited; the address stays active until the time above.")
     return 0
 
 

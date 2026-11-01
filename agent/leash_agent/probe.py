@@ -10,6 +10,7 @@ from .intents import (IntentsError, OneClick, QuoteRejected, VerifiedQuote, buil
                       verify_quote_response)
 
 MAX_PROBE_YOCTO = 15 * 10**22  # 0.15 NEAR
+MAX_WET_QUOTES = 3  # LEAD, 2026-11-01: at most 3 wet quotes in total before the rehearsal, none deposited into
 
 
 def address_kind(address: str) -> str:
@@ -22,6 +23,9 @@ def wet_probe(oneclick: OneClick, log: GuardianLog, *, dest_asset: str, recipien
               forbidden: tuple[str, ...] = (), now: datetime.datetime | None = None) -> tuple[dict, VerifiedQuote, dict]:
     if isinstance(amount, bool) or not isinstance(amount, int) or not 0 < amount <= MAX_PROBE_YOCTO:
         raise IntentsError("the probe amount must be more than 0 and at most 0.15 NEAR")
+    made = sum(1 for e in log.entries() if e.get("event") in ("probe_quote", "probe_rejected"))
+    if made >= MAX_WET_QUOTES:
+        raise IntentsError(f"{made} wet quotes are already in the log; the limit is {MAX_WET_QUOTES} before the rehearsal (LEAD decides more)")
     req = build_quote_request(dest_asset=dest_asset, recipient=recipient, refund_to=refund_to, amount=amount,
                               dry=False, now=now)
     response = oneclick.quote(req)

@@ -53,6 +53,15 @@ class Probe(unittest.TestCase):
         self.assertEqual(ctx.exception.response["quote"]["depositAddress"], "v.near")
         self.assertEqual(self.log.entries()[-1]["event"], "probe_rejected")
 
+    def test_at_most_three_wet_quotes_are_made_in_total(self):
+        fake = FakeOneClick()
+        for _ in range(3):
+            self.probe(fake)
+        with self.assertRaises(IntentsError) as ctx:
+            self.probe(fake)
+        self.assertIn("limit is 3", str(ctx.exception))
+        self.assertEqual(len(fake.quotes), 3)
+
     def test_address_kinds(self):
         self.assertEqual(address_kind("a" * 64), "implicit (64 hex characters)")
         self.assertEqual(address_kind("deposit.near"), "named account")

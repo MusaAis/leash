@@ -184,6 +184,7 @@ class Guardian:
                 "event": "quote_issued", "ts": self._now().isoformat(), "agent": self.agent, "route_id": route_id,
                 "amount": str(amount), "deposit_address": v.deposit_address,
                 "deadline": v.deadline.isoformat() if v.deadline else None, "request_deadline": req.body()["deadline"],
+                "echoed_deadline": issued.response.get("quoteRequest", {}).get("deadline"),
                 "signature": v.signature, "response": issued.response,
             })
             return issued

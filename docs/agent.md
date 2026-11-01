@@ -137,7 +137,7 @@ They are separate on purpose: a fooled agent whose payment the vault blocks cost
 
 ## Results
 
-Two clean runs on testnet, vault `leash3-vault.testnet`, contract 0.1.2, model `zai-org/GLM-5.1-FP8`, policy of 1 NEAR per payment, 3 NEAR per day and one payee. Every vault call has a transaction link in the [testnet proof](testnet-proof.md) (Runs 5 and 6).
+Two clean runs on testnet, vault `leash3-vault.testnet`, contract 0.1.2, requested model `zai-org/GLM-5.1-FP8` (an alias, see the signature test below; which model answered is not recorded), policy of 1 NEAR per payment, 3 NEAR per day and one payee. Every vault call has a transaction link in the [testnet proof](testnet-proof.md) (Runs 5 and 6).
 
 | Run | Result |
 |---|---|
@@ -160,5 +160,6 @@ What this does and does not show. It is one model, ten attack texts and two live
 
 `make agent-signature` asks each model one question and reports the kind of signature the gateway returns. It does not verify the signature. `MODELS="a b"` sets the models.
 
-- `zai-org/GLM-5.1-FP8`: refused with HTTP 400. With `x-no-aliasing` set, the gateway says this name is an alias of `z-ai/glm-5.3-flash` and asks for the canonical name.
+- `zai-org/GLM-5.1-FP8`: refused with HTTP 400. With `x-no-aliasing` set, the gateway says this name is an alias of `z-ai/glm-5.3-flash` and asks for the canonical name. An alias can move, so results for the requested id cannot be reproduced; which model answered the earlier runs is not recorded.
 - `z-ai/glm-5.3`: signature kind `gateway`, signer `0xb98a789cdc4817275f5155593ba73ef2a957e779` (ecdsa), and the signed text matched the request and response hashes we computed. A `gateway` signature binds the answer to the gateway, not to a model TEE, so this project does not call this model's answers TEE-attested.
+- `z-ai/glm-5.3-flash`: not aliased; the gateway reported signature kind `provider_tee`, signer `0x3b753b4406613c5e70ae640508632b600424fa0c` (ecdsa), and the signed text matched the request and response hashes we computed. The kind is what the gateway reports; we did not verify the signature or any attestation, so no TEE claim is made yet.

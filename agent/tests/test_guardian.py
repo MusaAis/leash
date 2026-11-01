@@ -73,6 +73,7 @@ class GuardianTests(unittest.TestCase):
         self.assertEqual(issued.verified.deposit_address, DEPOSIT)
         entry = self.log.entries()[-1]
         self.assertEqual((entry["event"], entry["signature"], entry["deposit_address"]), ("quote_issued", "ed25519:sig", DEPOSIT))
+        self.assertEqual((entry["echoed_deadline"], entry["request_deadline"]), (body["deadline"], body["deadline"]))  # condition B
         self.assertEqual(oct(self.log.path.stat().st_mode & 0o777), "0o600")
 
     def test_the_agent_cannot_choose_anything_but_route_and_amount(self):
