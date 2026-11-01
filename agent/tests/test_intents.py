@@ -88,7 +88,8 @@ class VerifyQuote(unittest.TestCase):
             "deposit address is the recipient": good_response(req, quote__depositAddress="0xrecipient"),
             "memo needed": good_response(req, quote__depositMemo="123"),
             "deadline in the past": good_response(req, quote__deadline=iso(NOW - datetime.timedelta(minutes=1))),
-            "deadline too far": good_response(req, quote__deadline=iso(NOW + datetime.timedelta(hours=2))),
+            "deadline too far": good_response(req, quote__deadline=iso(NOW + datetime.timedelta(days=5))),
+            "deadline before the requested one": good_response(req, quote__deadline=iso(NOW + datetime.timedelta(minutes=5))),
             "deadline missing": good_response(req, quote__deadline=None),
             "deadline garbage": good_response(req, quote__deadline="tomorrow"),
             "min out below the floor": good_response(req, quote__minAmountOut="1000"),
@@ -116,6 +117,7 @@ class VerifyQuote(unittest.TestCase):
             "fee as bool": [{"recipient": PLATFORM_FEE_RECIPIENT, "fee": True}],
             "two entries": good + [{"recipient": "attacker.near", "fee": 1}],
             "same entry twice": good + good,
+            "limit order set": [{"recipient": PLATFORM_FEE_RECIPIENT, "fee": 20, "limitOrderId": "abc"}],
             "extra field": [{"recipient": PLATFORM_FEE_RECIPIENT, "fee": 20, "memo": "x"}],
             "not a list": good[0],
             "text": "fee",
@@ -126,6 +128,17 @@ class VerifyQuote(unittest.TestCase):
                 verify_quote_response(req, good_response(req, echo__appFees=fees), now=NOW)
         with self.assertRaises(QuoteRejected, msg="quote-level fee, even the pinned one"):
             verify_quote_response(req, good_response(req, quote__appFees=good), now=NOW)
+
+    def test_the_live_wet_shape_is_accepted_and_the_address_life_is_bounded(self):
+        req = make_request(dry=False)
+        live = [{"recipient": PLATFORM_FEE_RECIPIENT, "fee": PLATFORM_FEE_BPS, "limitOrderId": None}]
+        asked = NOW + datetime.timedelta(minutes=20)
+        for life in (datetime.timedelta(0), datetime.timedelta(days=3), datetime.timedelta(days=4)):
+            answer = good_response(req, echo__appFees=live, quote__deadline=iso(asked + life))
+            self.assertEqual(verify_quote_response(req, answer, now=NOW).deposit_address, DEPOSIT)
+        answer = good_response(req, quote__deadline=iso(asked + datetime.timedelta(days=4, seconds=1)))
+        with self.assertRaises(QuoteRejected):
+            verify_quote_response(req, answer, now=NOW)
 
     def test_structurally_bad_responses_are_rejected(self):
         req = make_request()

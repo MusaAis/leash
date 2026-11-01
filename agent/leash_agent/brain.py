@@ -291,6 +291,16 @@ _OPENER = urllib.request.build_opener(_NoRedirect)
 _REDIRECT_HINT = "unexpected redirect, refused (the API key is never sent to another URL); check NEAR_AI_BASE_URL"
 
 
+MAX_AI_RESPONSE_BYTES = 2_000_000
+
+
+def _read_capped(resp) -> str:
+    raw = resp.read(MAX_AI_RESPONSE_BYTES + 1)
+    if len(raw) > MAX_AI_RESPONSE_BYTES:
+        raise RuntimeError("NEAR AI Cloud answer is too large; refused")
+    return raw.decode()
+
+
 def list_models(config: Config) -> list[tuple[str, str]]:
     check_ai_url(config.ai_base_url)
     request = urllib.request.Request(
@@ -299,7 +309,7 @@ def list_models(config: Config) -> list[tuple[str, str]]:
     )
     try:
         with _OPENER.open(request, timeout=60) as resp:
-            return parse_models(json.loads(resp.read().decode()))
+            return parse_models(json.loads(_read_capped(resp)))
     except urllib.error.HTTPError as exc:
         hint = f": {_REDIRECT_HINT}" if 300 <= exc.code < 400 else ""
         raise RuntimeError(f"NEAR AI Cloud returned HTTP {exc.code} for the models list{hint}") from exc
@@ -313,7 +323,7 @@ def _http_post(url: str, headers: dict, body: dict) -> dict:
     )
     try:
         with _OPENER.open(request, timeout=120) as resp:
-            return json.loads(resp.read().decode())
+            return json.loads(_read_capped(resp))
     except urllib.error.HTTPError as exc:
         hints = {
             401: "the API key is invalid; check NEAR_AI_API_KEY",

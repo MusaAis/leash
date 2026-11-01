@@ -2,6 +2,24 @@
 
 All notable changes are listed here. Versions follow semantic versioning.
 
+## [Unreleased]
+### Added
+- `make intents-wet-probe`: one real 1Click quote (at most 0.15 NEAR, default 0.1; `PROBE_AMOUNT=0.15` to change it) to read the deposit address format. Nothing is deposited. Not yet run against the live service.
+- `make wrap-storage`: read-only view calls on `wrap.near` (`storage_balance_bounds`, `storage_balance_of`). No transaction, no key. First live read: the storage deposit is 0.00125 NEAR (min equals max).
+- `make agent-signature`: asks the configured model and `z-ai/glm-5.3` one question and reports which kind of signature the gateway gives. The signature itself is not verified. Not yet run live.
+
+### Fixes from the review of v0.3.0
+- Error and rejection messages no longer carry the recipient or the refund account, and everything printed hides both in any letter case.
+- Every call to 1Click counts toward the limits (10 a minute, 60 an hour), also rejected and failed ones; a lock file covers the check and the entry.
+- An existing guardian log with wider permissions is set to 0600 on the next write.
+- `.env`: keys starting with `LEASH_ALLOW_` are refused in the file, and `export KEY=value` lines count like `KEY=value`.
+- Answers from NEAR AI Cloud are read up to 2 MB.
+- `scripts/check_docs.py` accepts a `-fixN` suffix on a version.
+- From the first real quote: the quote's deadline may be up to 4 days after the requested one (the live service gave 3 days), and the fee entry may carry `limitOrderId: null`. The open-quote rule uses the requested deadline.
+- `make agent-signature MODELS="a b"` chooses the models.
+- Docs: the Chain Signatures row is marked roadmap, the refund account text matches the real flow, an unverified fee remark is removed, and "checked against the live API" no longer reads as "deployed on mainnet".
+- Tests: 198 agent tests (161 before).
+
 ## [0.3.0] - 2026-11-01
 ### Added
 - NEAR Intents (1Click) dry quotes: `agent/leash_agent/intents.py` (client, request builder, answer check) and `guardian.py` (route id and amount in, checked quote out, private log, rate limit). `make intents-tokens` and `make intents-dry`. No funds move. See `docs/intents.md`.

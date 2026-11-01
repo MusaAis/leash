@@ -28,6 +28,7 @@ TERMINAL = {"SUCCESS", "REFUNDED", "FAILED"}
 # The only fee entry accepted: 1Click's own 0.2%. Recorded from a live answer, see docs/intents.md.
 PLATFORM_FEE_RECIPIENT = "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd"
 PLATFORM_FEE_BPS = 20
+MAX_ADDRESS_LIFE_DAYS = 4  # the live answer keeps the deposit address 3 days past the requested deadline
 # Request fields nobody may set.
 FORBIDDEN_ECHO = ("customRecipientMsg", "virtualChainRecipient", "virtualChainRefundRecipient", "appFees", "rebates")
 
@@ -203,11 +204,13 @@ def verify_quote_response(req: QuoteRequest, response: object, *, now: datetime.
     for key in ("dry", "swapType", "slippageTolerance", "originAsset", "destinationAsset", "recipient", "refundTo", "depositType",
                 "refundType", "recipientType", "amount"):
         if echo.get(key) != body[key]:
-            raise QuoteRejected(f"response changed {key}: sent {body[key]!r}, got {echo.get(key)!r}")
+            detail = "" if key in ("recipient", "refundTo") else f": sent {body[key]!r}, got {echo.get(key)!r}"
+            raise QuoteRejected(f"response changed {key}{detail}")
     fees = echo.get("appFees")
     if fees not in (None, "", [], {}):
         entry = fees[0] if isinstance(fees, list) and len(fees) == 1 else None
-        if not (isinstance(entry, dict) and set(entry) == {"recipient", "fee"}
+        if not (isinstance(entry, dict) and set(entry) - {"limitOrderId"} == {"recipient", "fee"}
+                and entry.get("limitOrderId") is None
                 and entry["recipient"] == PLATFORM_FEE_RECIPIENT
                 and isinstance(entry["fee"], int) and not isinstance(entry["fee"], bool)
                 and entry["fee"] == PLATFORM_FEE_BPS):
@@ -241,8 +244,9 @@ def verify_quote_response(req: QuoteRequest, response: object, *, now: datetime.
             deadline = parse_iso(quote.get("deadline"))
         except (ValueError, TypeError) as exc:
             raise QuoteRejected(f"quote deadline is missing or invalid: {exc}") from exc
-        if not now < deadline <= now + datetime.timedelta(minutes=MAX_DEADLINE_MINUTES, seconds=60):
-            raise QuoteRejected(f"quote deadline {deadline.isoformat()} is not within {MAX_DEADLINE_MINUTES} minutes from now")
+        asked = parse_iso(body["deadline"])
+        if not (now < deadline and asked <= deadline <= asked + datetime.timedelta(days=MAX_ADDRESS_LIFE_DAYS)):
+            raise QuoteRejected(f"quote deadline {deadline.isoformat()} is outside the allowed range")
         if not isinstance(signature, str) or not signature:
             raise QuoteRejected("the quote has no signature to keep")
     estimate = quote.get("timeEstimate")
@@ -284,7 +288,7 @@ class OneClick:
         query = urllib.parse.urlencode({"depositAddress": deposit_address})
         data = self._http("GET", f"{self.base_url}/v0/status?{query}", self._headers(), None)
         if not isinstance(data, dict) or data.get("status") not in STATUSES:
-            raise IntentsError(f"unexpected status answer: {str(data)[:200]}")
+            raise IntentsError(f"unexpected status answer (fields: {sorted(data)[:10] if isinstance(data, dict) else type(data).__name__})")
         return data
 
 

@@ -1,4 +1,5 @@
 import datetime
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,7 +8,7 @@ from unittest import mock
 from leash_agent import __main__ as cli
 from leash_agent.chain import Snapshot
 from leash_agent.guardian import EnvRoutes, Guardian, GuardianLog, Refused, intent_denial
-from leash_agent.intents import IntentsError, QuoteRejected
+from leash_agent.intents import IntentsError, QuoteRejected, parse_iso
 from tests.test_chain import make_config
 from tests.test_intents import ASSET, DEPOSIT, NOW
 
@@ -70,7 +71,7 @@ class GuardianTests(unittest.TestCase):
         self.assertEqual((body["recipient"], body["refundTo"], body["destinationAsset"], body["dry"]),
                          ("0xRecipient", "v.near", ASSET, False))
         self.assertEqual(issued.verified.deposit_address, DEPOSIT)
-        entry = self.log.entries()[0]
+        entry = self.log.entries()[-1]
         self.assertEqual((entry["event"], entry["signature"], entry["deposit_address"]), ("quote_issued", "ed25519:sig", DEPOSIT))
         self.assertEqual(oct(self.log.path.stat().st_mode & 0o777), "0o600")
 
@@ -120,7 +121,7 @@ class GuardianTests(unittest.TestCase):
             guardian = self.make(FakeOneClick(tamper))
             with self.assertRaises(QuoteRejected, msg=name):
                 guardian.quote(0, NEAR // 2)
-        events = [e["event"] for e in self.log.entries()]
+        events = [e["event"] for e in self.log.entries() if e["event"] != "quote_call"]
         self.assertEqual(events, ["quote_rejected"] * len(tampers))
 
     def test_rate_limit_per_hour(self):
@@ -167,7 +168,7 @@ class GuardianTests(unittest.TestCase):
         issued = guardian.dry_quote(0, NEAR // 2, refund_to="real.near")
         self.assertTrue(issued.request.dry)
         self.assertEqual(issued.request.refund_to, "real.near")
-        self.assertEqual(self.log.entries(), [])
+        self.assertEqual([e["event"] for e in self.log.entries()], ["quote_call"])  # counted, nothing issued
 
     def test_env_routes(self):
         with mock.patch.dict("os.environ", {}, clear=True):
@@ -177,6 +178,77 @@ class GuardianTests(unittest.TestCase):
             self.assertEqual(EnvRoutes.from_env().get("a", 0).recipient, "0xR")
             with self.assertRaises(Refused):
                 EnvRoutes.from_env().get("a", 1)
+
+    def test_rejected_and_failed_calls_count_toward_the_call_limits(self):
+        guardian = self.make(FakeOneClick(lambda r: r["quote"].update(amountIn="1")))
+        for _ in range(10):
+            with self.assertRaises(QuoteRejected):
+                guardian.dry_quote(0, NEAR // 2)
+        with self.assertRaises(Refused) as ctx:
+            guardian.dry_quote(0, NEAR // 2)
+        self.assertIn("rate_limit", str(ctx.exception))
+        self.clock.now += datetime.timedelta(seconds=61)  # the minute window moves on
+        with self.assertRaises(QuoteRejected):
+            guardian.dry_quote(0, NEAR // 2)
+
+    def test_failed_http_calls_are_counted_and_logged(self):
+        class Down:
+            def quote(self, req):
+                raise IntentsError("cannot reach 1Click: down")
+        guardian = self.make(Down())
+        for _ in range(10):
+            with self.assertRaises(IntentsError):
+                guardian.dry_quote(0, NEAR // 2)
+        self.assertEqual(sum(e["event"] == "quote_failed" for e in self.log.entries()), 10)
+        with self.assertRaises(Refused):
+            guardian.dry_quote(0, NEAR // 2)
+
+    def test_two_guardians_on_one_log_cannot_both_get_the_only_real_quote(self):
+        import threading
+        import time
+
+        class Slow(FakeOneClick):
+            def quote(self, req):
+                time.sleep(0.4)
+                return super().quote(req)
+
+        results = []
+
+        def run(guardian):
+            try:
+                guardian.quote(0, NEAR // 2)
+                results.append("issued")
+            except Refused as exc:
+                results.append(str(exc).split(":")[0])
+
+        first = self.make(Slow())
+        second = Guardian(agent="a.near", vault_account="v.near", snapshot=lambda: self.snapshot,
+                          routes=EnvRoutes(ASSET, "0xRecipient"), oneclick=Slow(), log=GuardianLog(self.log.path),
+                          other_accounts=("owner.near", "guardian.near"), now=self.clock, sleep=lambda s: None)
+        threads = [threading.Thread(target=run, args=(first,)), threading.Thread(target=run, args=(second,))]
+        threads[0].start()
+        time.sleep(0.1)
+        threads[1].start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(sorted(results), ["issued", "outstanding_quote"])
+
+    def test_the_open_quote_rule_follows_the_requested_deadline_not_the_address_life(self):
+        def longer(response):
+            asked = parse_iso(response["quoteRequest"]["deadline"]) + datetime.timedelta(days=3)
+            response["quote"]["deadline"] = asked.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        guardian = self.make(FakeOneClick(longer))
+        guardian.quote(0, NEAR // 2)
+        with self.assertRaises(Refused):
+            guardian.quote(0, NEAR // 2)
+        self.clock.now += datetime.timedelta(minutes=21)
+        guardian.quote(0, NEAR // 2)
+
+    def test_an_existing_wide_log_file_is_tightened(self):
+        self.log.path.write_text("")
+        os.chmod(self.log.path, 0o644)
+        self.log.append({"event": "x"})
+        self.assertEqual(oct(self.log.path.stat().st_mode & 0o777), "0o600")
 
 
 class Cli(unittest.TestCase):

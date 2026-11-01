@@ -52,6 +52,31 @@ class EnvFile(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("repeats a key", err.getvalue())
 
+    def test_leash_allow_keys_are_refused_in_the_file_and_no_value_is_shown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            for line in ("LEASH_ALLOW_MAINNET=yes-secret", "export LEASH_ALLOW_CUSTOM_AI_HOST=1"):
+                path.write_text(f"A=1\n{line}\n")
+                with self.assertRaises(EnvFileError) as ctx:
+                    load_env_file(path)
+                self.assertIn("line 2", str(ctx.exception))
+                self.assertIn("LEASH_ALLOW_", str(ctx.exception))
+                self.assertNotIn("secret", str(ctx.exception))
+
+    def test_export_lines_count_like_plain_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            path.write_text("NETWORK=testnet\nexport NETWORK=mainnet\n")
+            with self.assertRaises(EnvFileError) as ctx:
+                load_env_file(path)
+            self.assertIn("NETWORK on lines 1, 2", str(ctx.exception))
+            path.write_text("export LEASH_T_EXPORT=ok\n")
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("LEASH_T_EXPORT", None)
+                load_env_file(path)
+                self.assertEqual(os.environ["LEASH_T_EXPORT"], "ok")
+                os.environ.pop("LEASH_T_EXPORT", None)
+
 
 if __name__ == "__main__":
     unittest.main()

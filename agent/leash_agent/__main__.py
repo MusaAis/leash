@@ -16,6 +16,10 @@ from .config import Config, EnvFileError
 from .guardian import EnvRoutes, Guardian, GuardianLog
 from .intents import IntentsError, OneClick, QuoteRejected, find_tokens, iso, utc_now
 from .preflight import PolicySim, precheck
+from .probe import address_kind, wet_probe
+from .redact import scrub
+from .signature import EXTRA_MODEL, check_signature, describe
+from .storage import check_storage
 
 MAX_SAMPLES = 10
 
@@ -29,9 +33,8 @@ def intents_tokens(symbol, chain, oneclick) -> int:
 
 
 def redact(response, secret: str) -> str:
-    """Pretty JSON of an answer with the recipient address replaced, so it can be pasted in chat."""
-    text = json.dumps(response, indent=2)
-    return text.replace(secret, "<RECIPIENT>") if secret else text
+    """Pretty JSON of an answer with the private values hidden, so it can be pasted in chat."""
+    return scrub(json.dumps(response, indent=2), ((secret, "<RECIPIENT>"),))
 
 
 def intents_dry(cfg, vault, amount_near, oneclick) -> int:
@@ -51,7 +54,7 @@ def intents_dry(cfg, vault, amount_near, oneclick) -> int:
     try:
         issued = guardian.dry_quote(0, amount, refund_to=os.environ.get("LEASH_DRY_REFUND_TO") or None)
     except QuoteRejected as exc:  # evidence: show what 1Click said, with the recipient hidden
-        print(f"REJECTED by the guardian: {exc}\n\nraw response (recipient hidden):\n{redact(exc.response, routes.get(cfg.agent, 0).recipient)}")
+        print(f"REJECTED by the guardian: {scrub(str(exc))}\n\nraw response (recipient hidden):\n{redact(exc.response, routes.get(cfg.agent, 0).recipient)}")
         print(f"\nchecked at {iso(utc_now())}. The full answer is in the private guardian log.")
         return 1
     v, hidden = issued.verified, routes.get(cfg.agent, 0).recipient
@@ -59,6 +62,61 @@ def intents_dry(cfg, vault, amount_near, oneclick) -> int:
     print(f"\nverified: amountIn={v.amount_in} amountOut={v.amount_out} minAmountOut={v.min_amount_out} timeEstimate={v.time_estimate}")
     print(f"\nraw response (recipient hidden):\n{redact(issued.response, hidden)}")
     print(f"\nchecked at {iso(utc_now())}. The recipient is hidden above and lives only in your .env.")
+    return 0
+
+
+def intents_wet_probe(cfg, amount_near, oneclick) -> int:
+    """One real quote, never paid. Prints the deposit address and its format."""
+    asset = os.environ.get("LEASH_ROUTE_DEST_ASSET", "")
+    if not asset:
+        found = find_tokens(oneclick.tokens(), "USDC", "base")
+        if len(found) != 1:
+            raise IntentsError(f"expected exactly one USDC on base in the live token list, found {len(found)}; set LEASH_ROUTE_DEST_ASSET")
+        asset = found[0]["assetId"]
+    recipient = EnvRoutes.from_env(asset).get(cfg.agent, 0).recipient
+    refund_to = os.environ.get("LEASH_DRY_REFUND_TO", "")
+    if not refund_to:
+        raise IntentsError("set LEASH_DRY_REFUND_TO to an existing NEAR account you control")
+    log = GuardianLog.from_env()
+    try:
+        body, v, response = wet_probe(oneclick, log, dest_asset=asset, recipient=recipient, refund_to=refund_to,
+                                      amount=int(near_to_yocto(amount_near)), forbidden=(cfg.vault, cfg.owner))
+    except QuoteRejected as exc:
+        print(f"REJECTED: {scrub(str(exc))}\n\nraw response (recipient hidden):\n{redact(exc.response, recipient)}")
+        return 1
+    print(f"request sent (wet): {redact(body, recipient)}")
+    print(f"\nverified: amountIn={v.amount_in} amountOut={v.amount_out} minAmountOut={v.min_amount_out} timeEstimate={v.time_estimate}")
+    print(f"deposit address: {v.deposit_address}\nformat: {address_kind(v.deposit_address)}\naddress active until: {iso(v.deadline)}")
+    print(f"\nraw response (recipient hidden):\n{redact(response, recipient)}")
+    print("\nDO NOT SEND ANY FUNDS TO THIS ADDRESS. The quote expires and nothing was deposited.")
+    return 0
+
+
+def wrap_storage(accounts: list[str], post=None) -> int:
+    """Read-only: wrap.near storage bounds and balances. Defaults: the last probe's deposit address and the refund account."""
+    accounts = list(accounts)
+    for entry in reversed(GuardianLog.from_env().entries()):
+        if entry.get("event") == "probe_quote":
+            accounts.append(entry["response"]["quote"]["depositAddress"])
+            break
+    refund = os.environ.get("LEASH_DRY_REFUND_TO", "")
+    if refund:
+        accounts.append(refund)
+    results = check_storage(list(dict.fromkeys(accounts)), **({"post": post} if post else {}))
+    print(f"read-only checks on wrap.near at {iso(utc_now())} (no transaction, no key):")
+    for name, value in results.items():
+        print(f"{name}: {json.dumps(value)}")
+    return 0
+
+
+def agent_signature(cfg, models, check=check_signature) -> int:
+    """F-1: ask each model one question and report the signature kind. Never verifies the signature."""
+    if not cfg.ai_api_key:
+        raise RuntimeError("set NEAR_AI_API_KEY in .env")
+    log = GuardianLog.from_env()
+    print(f"signature test at {iso(utc_now())} (the signature itself is not verified)")
+    for model in models or [cfg.ai_model, EXTRA_MODEL]:
+        print(describe(check(model, cfg.ai_api_key, cfg.ai_base_url, log=log)))
     return 0
 
 
@@ -84,6 +142,13 @@ def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, mod
     toks.add_argument("--chain")
     dry = sub.add_parser("intents-dry", help="ask 1Click for a dry quote (no deposit address, no funds)")
     dry.add_argument("--amount", required=True, help="NEAR to swap, for example 0.5")
+    wet = sub.add_parser("intents-wet-probe", help="one real quote to read the deposit address (never pay it)")
+    wet.add_argument("--amount", default="0.1", help="NEAR, at most 0.15 (default 0.1)")
+    wet.add_argument("--yes", action="store_true", help="confirm that this asks for a real quote")
+    ws = sub.add_parser("wrap-storage", help="read-only: wrap.near storage bounds and balances")
+    ws.add_argument("--account", action="append", default=[], help="extra account to check (repeatable)")
+    sig = sub.add_parser("agent-signature", help="F-1: which signature kind does the gateway give a model's answer?")
+    sig.add_argument("--model", action="append", default=[], help="model id (repeatable; default: the configured model and z-ai/glm-5.3)")
     args = parser.parse_args(argv)
 
     try:
@@ -103,6 +168,15 @@ def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, mod
     try:
         if args.command == "intents-tokens":
             return intents_tokens(args.symbol, args.chain, oneclick or OneClick.from_env())
+        if args.command == "agent-signature":
+            return agent_signature(cfg, args.model)
+        if args.command == "wrap-storage":
+            return wrap_storage(args.account)
+        if args.command == "intents-wet-probe":
+            if not args.yes:
+                print("error: a wet quote is a real quote. Add --yes. It is never paid.", file=sys.stderr)
+                return 1
+            return intents_wet_probe(cfg, args.amount, oneclick or OneClick.from_env())
         if args.command == "intents-dry":
             return intents_dry(cfg, vault, args.amount, oneclick or OneClick.from_env())
         if args.command == "check":
@@ -164,7 +238,8 @@ def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, mod
             return 2
         return 3 if any(rep.invalid for rep in reports) else 0
     except Exception as exc:  # report any failure as a plain error, never a traceback
-        print(f"error: {type(exc).__name__}: {exc}" if not isinstance(exc, (ChainError, RuntimeError)) else f"error: {exc}", file=sys.stderr)
+        message = f"{type(exc).__name__}: {exc}" if not isinstance(exc, (ChainError, RuntimeError)) else str(exc)
+        print(f"error: {scrub(message)}", file=sys.stderr)
         return 1
 
 

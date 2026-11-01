@@ -15,17 +15,19 @@ Expected: `intents-dry` ends with `verified: amountIn=... amountOut=... minAmoun
 
 ## What the guardian does
 
-- Builds the request itself: swap NEAR (`nep141:wrap.near`) for one destination asset, to the owner's recipient, refund to the owner's account, deadline within 30 minutes, slippage at most 3%. The agent supplies only a route id and an amount.
-- Checks the answer field by field: recipient, refund account, both assets, amount and `amountIn` must equal the request; `minAmountOut` must respect the slippage; no extra fee or message fields.
+- Builds the request itself: swap NEAR (`nep141:wrap.near`) for one destination asset, to the owner's recipient, deadline within 30 minutes, slippage at most 3%. The refund goes to the vault account; a dry quote uses the account in `LEASH_DRY_REFUND_TO` instead. The agent supplies only a route id and an amount.
+- Checks the answer field by field: recipient, refund account, both assets, amount and `amountIn` must equal the request; `minAmountOut` must respect the slippage; no extra fee or message fields. The quote's deadline must not be earlier than the requested one and at most 4 days later.
 - Sends requests only to `1click.chaindefuser.com` over https, with no redirects and a size cap.
-- Keeps a private log (`~/.leash/guardian-log.jsonl`, mode 0600) with every answer and its signature. The quote signature is saved, not verified.
+- Keeps a private log (`~/.leash/guardian-log.jsonl`, mode 0600, tightened on every write) with every answer and its signature. The quote signature is saved, not verified.
+- Counts every call to 1Click, rejected or failed ones too: at most 10 a minute and 60 an hour, and 6 real quotes an hour with one open at a time. A lock file keeps two processes from passing the same check.
+- Prints nothing private: the recipient and the refund account are hidden in every printed line, in any letter case, error messages included.
 
-## Recorded results (mainnet, dry quotes, 2026-11-01)
+## Recorded results (live 1Click mainnet API, dry quotes, 2026-11-01)
 
 - A request with the default Python user agent got HTTP 403 (Cloudflare error 1010). The client sends `User-Agent: leash-agent/0.3 (+https://github.com/MusaAis/leash)`.
 - The token list holds exactly one USDC on Base: `nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near` (6 decimals).
 - Without an API key, 1Click adds one fee entry to the echoed request: `fee: 20` (20 bps, 0.2%) to the account `5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd`. It was identical in every answer. The guardian accepts exactly this entry and rejects any other `appFees` value. The docs (docs.near-intents.org, fees page) state a 0.2% fee without an API key; they do not name this account, so it is **inferred** to belong to 1Click. Effect if wrong: at most 0.2% of a swap. If 1Click changes it, the guardian refuses.
-- In the 0.5 NEAR answer: `refundFee` 0, `withdrawFee` 2400 (0.0024 USDC). The output at small sizes is consistent with a fixed fee of that size; it was read from the 0.5 answer only.
+- In the 0.5 NEAR answer: `refundFee` 0 and `withdrawFee` 2400 (0.0024 USDC). It was not read at other sizes.
 
 | NEAR in | USDC out (6 decimals) | Estimate (s) |
 |---|---|---|
@@ -40,6 +42,21 @@ Expected: `intents-dry` ends with `verified: amountIn=... amountOut=... minAmoun
 | 0.001 | 1962 | 24 |
 
 Prices move between calls (two answers for 0.5 NEAR gave 2177761 and 2184717). Every size passed the guardian's checks.
+
+## One real quote, never paid (2026-11-01, 0.1 NEAR)
+
+- The answer holds a deposit address: a 64-hex implicit account (not a named account). The quote's `deadline` is exactly 3 days after the deadline we asked for (20 minutes), so the address stays active for 3 days. The asked deadline is the one the guardian uses for its "one open quote" rule.
+- The platform fee entry in this answer has one more key, `limitOrderId`, set to `null`. The guardian accepts it only as `null`.
+- 0.1 NEAR gave 0.425652 USDC (minimum 0.421395), estimate 24 seconds, `withdrawFee` 2400. Nothing was deposited.
+
+## Preparing real payments (written and unit-tested)
+
+```
+make intents-wet-probe        # one real quote of 0.1 NEAR: prints the deposit address, its format and the expiry
+make wrap-storage             # read-only: wrap.near storage bounds and the storage balance of the probe's address (ACCOUNT=x.near adds more)
+```
+
+The probe never deposits. Never send funds to the address it prints. The storage check sends no transaction and holds no key; it reads `LEASH_RPC_URL` (default: a public node from the NEAR docs list). Read on 2026-11-01: the storage deposit of `wrap.near` is 0.00125 NEAR (minimum and maximum are the same).
 
 ## Not done in this release
 

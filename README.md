@@ -46,8 +46,8 @@ Measured on NEAR testnet. Every row has its evidence in [docs/testnet-proof.md](
 | Check | Result |
 |---|---|
 | Contract unit tests | 40 passed |
-| Agent unit tests | 161 passed |
-| 1Click dry quotes on mainnet, no funds | 9 sizes from 0.5 to 0.001 NEAR passed the guardian's checks, see [docs/intents.md](docs/intents.md) |
+| Agent unit tests | 198 passed |
+| 1Click dry quotes against the live mainnet API, no funds, no LEASH contract on mainnet | 9 sizes from 0.5 to 0.001 NEAR passed the guardian's checks, see [docs/intents.md](docs/intents.md) |
 | Scripted testnet demo (`make demo-testnet`) | 12 checks passed, 0 failed |
 | Hijacked agent on a fresh policy, every request sent straight to the vault | 14 requests: 11 blocked by the vault, 3 paid to the allowlisted payee inside the caps (by design), 0 paid to a non-payee |
 | Live model, attack text only | Control task passed. 10 of 10 attacks refused by the agent, and 30 of 30 with three samples per attack at temperature 0.7 |
@@ -72,7 +72,7 @@ make test-agent   # agent tests
 make check        # format check, lint, contract and agent tests
 ```
 
-Expected: `make test` ends with `test result: ok. 40 passed`, and `make test-agent` prints `Ran 161 tests` followed by `OK`.
+Expected: `make test` ends with `test result: ok. 40 passed`, and `make test-agent` prints `Ran 198 tests` followed by `OK`.
 
 ### Testnet demo (optional, needs network)
 
@@ -113,7 +113,7 @@ Before it sends anything, the suite checks the vault (policy, pauses, allowlist,
 | NEP-297 style events | `EVENT_JSON:` logs with standard `leash` for every decision | Implemented |
 | NEAR AI Cloud | The agent's decisions, through its OpenAI-compatible API | Implemented |
 | NEAR Intents (1Click) | The guardian builds and checks dry quotes. No payment goes through the vault yet | Quotes implemented, payments planned |
-| Chain Signatures | Cross-chain payments behind the same vault | Planned |
+| Chain Signatures | Not used in this release | Roadmap |
 
 ## Contract interface
 

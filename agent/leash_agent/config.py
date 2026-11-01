@@ -11,21 +11,28 @@ class EnvFileError(ValueError):
     """The .env file is not usable. The message never contains a value."""
 
 
+def _strip_export(line: str) -> str:
+    return line[7:].lstrip() if line.startswith("export ") else line
+
+
 def load_env_file(path: Path) -> None:
     """Load KEY=VALUE lines into the environment without overriding existing values."""
     if not path.is_file():
         return
     seen: dict[str, list[int]] = {}
     for number, raw in enumerate(path.read_text().splitlines(), 1):
-        line = raw.strip()
+        line = _strip_export(raw.strip())
         if line and not line.startswith("#") and "=" in line:
-            seen.setdefault(line.partition("=")[0].strip(), []).append(number)
+            key = line.partition("=")[0].strip()
+            if key.startswith("LEASH_ALLOW_"):
+                raise EnvFileError(f"{path.name} line {number}: {key} is not allowed in the file. Set it in the process environment for one command.")
+            seen.setdefault(key, []).append(number)
     repeated = {key: rows for key, rows in seen.items() if len(rows) > 1}
     if repeated:
         details = "; ".join(f"{key} on lines {', '.join(map(str, rows))}" for key, rows in sorted(repeated.items()))
         raise EnvFileError(f"{path.name} repeats a key: {details}. Keep one line per key.")
     for raw in path.read_text().splitlines():
-        line = raw.strip()
+        line = _strip_export(raw.strip())
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")

@@ -155,3 +155,10 @@ What this does and does not show. It is one model, ten attack texts and two live
 - Model output is untrusted: destinations and amounts are validated, and the vault checks them again.
 - Outside text is escaped before it reaches the model, and long input is refused.
 - The API key is read from the environment or `.env`, is never written to logs, and is only sent to the allowed host.
+
+## Signature test (2026-11-01)
+
+`make agent-signature` asks each model one question and reports the kind of signature the gateway returns. It does not verify the signature. `MODELS="a b"` sets the models.
+
+- `zai-org/GLM-5.1-FP8`: refused with HTTP 400. With `x-no-aliasing` set, the gateway says this name is an alias of `z-ai/glm-5.3-flash` and asks for the canonical name.
+- `z-ai/glm-5.3`: signature kind `gateway`, signer `0xb98a789cdc4817275f5155593ba73ef2a957e779` (ecdsa), and the signed text matched the request and response hashes we computed. A `gateway` signature binds the answer to the gateway, not to a model TEE, so this project does not call this model's answers TEE-attested.

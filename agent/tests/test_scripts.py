@@ -22,6 +22,21 @@ def answer(*perms):
 FUNCTION_CALL = {"FunctionCall": {"allowance": "1", "receiver_id": "v.testnet", "method_names": ["pause_all"]}}
 
 
+_spec_docs = importlib.util.spec_from_file_location("check_docs", ROOT / "scripts" / "check_docs.py")
+check_docs = importlib.util.module_from_spec(_spec_docs)
+_spec_docs.loader.exec_module(check_docs)
+
+
+class VersionNames(unittest.TestCase):
+    def test_a_fix_suffix_is_understood_and_an_unreleased_heading_is_not_a_version(self):
+        import re
+        self.assertEqual(re.search(check_docs.VERSION_LINE, "- Version: v0.3.0-fix1 (x)").group(1), "v0.3.0-fix1")
+        self.assertEqual(re.search(check_docs.VERSION_LINE, "- Version: v0.3.0").group(1), "v0.3.0")
+        log = "## [Unreleased]\n## [0.3.0-fix1] - d\n## [0.3.0] - d\n"
+        self.assertEqual(re.search(check_docs.CHANGELOG_TOP, log, re.M).group(1), "0.3.0-fix1")
+        self.assertIsNone(re.search(check_docs.CHANGELOG_TOP, "## [Unreleased]\n", re.M))
+
+
 class RiskyKeys(unittest.TestCase):
     def test_only_non_function_call_keys_are_listed(self):
         self.assertEqual(fak.risky_keys(answer("FullAccess", FUNCTION_CALL, "FullAccess")), ["ed25519:K0", "ed25519:K2"])
