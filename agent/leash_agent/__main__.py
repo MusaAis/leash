@@ -11,14 +11,58 @@ from . import __version__
 from .agent import Agent
 from .attacks import build_attacks, run_suite
 from .brain import Brain, list_models, missing_model_note
-from .chain import ChainError, Vault
-from .config import Config
+from .chain import ChainError, Vault, near_to_yocto
+from .config import Config, EnvFileError
+from .guardian import EnvRoutes, Guardian, GuardianLog
+from .intents import IntentsError, OneClick, QuoteRejected, find_tokens, iso, utc_now
 from .preflight import PolicySim, precheck
 
 MAX_SAMPLES = 10
 
 
-def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, models_fn=list_models) -> int:
+def intents_tokens(symbol, chain, oneclick) -> int:
+    rows = find_tokens(oneclick.tokens(), symbol, chain)
+    for token in sorted(rows, key=lambda t: (str(t.get("blockchain")), str(t.get("symbol")))):
+        print(f"{token.get('blockchain')}\t{token.get('symbol')}\tdecimals={token.get('decimals')}\tprice={token.get('price')}\t{token['assetId']}")
+    print(f"\n{len(rows)} token(s)")
+    return 0 if rows else 1
+
+
+def redact(response, secret: str) -> str:
+    """Pretty JSON of an answer with the recipient address replaced, so it can be pasted in chat."""
+    text = json.dumps(response, indent=2)
+    return text.replace(secret, "<RECIPIENT>") if secret else text
+
+
+def intents_dry(cfg, vault, amount_near, oneclick) -> int:
+    """A dry quote of a small amount: no deposit address and no funds. Prints the raw answer as evidence."""
+    amount = int(near_to_yocto(amount_near))
+    asset = os.environ.get("LEASH_ROUTE_DEST_ASSET", "")
+    if not asset:  # default: USDC on Base, exactly one match
+        found = find_tokens(oneclick.tokens(), "USDC", "base")
+        if len(found) != 1:
+            raise IntentsError(f"expected exactly one USDC on base in the live token list, found {len(found)}; set LEASH_ROUTE_DEST_ASSET")
+        asset = found[0]["assetId"]
+    routes = EnvRoutes.from_env(asset)
+    guardian = Guardian(
+        agent=cfg.agent, vault_account=cfg.vault, snapshot=vault.snapshot, routes=routes,
+        oneclick=oneclick, log=GuardianLog.from_env(), other_accounts=(cfg.owner,),
+    )
+    try:
+        issued = guardian.dry_quote(0, amount, refund_to=os.environ.get("LEASH_DRY_REFUND_TO") or None)
+    except QuoteRejected as exc:  # evidence: show what 1Click said, with the recipient hidden
+        print(f"REJECTED by the guardian: {exc}\n\nraw response (recipient hidden):\n{redact(exc.response, routes.get(cfg.agent, 0).recipient)}")
+        print(f"\nchecked at {iso(utc_now())}. The full answer is in the private guardian log.")
+        return 1
+    v, hidden = issued.verified, routes.get(cfg.agent, 0).recipient
+    print(f"request sent (dry): {redact(issued.request.body(), hidden)}")
+    print(f"\nverified: amountIn={v.amount_in} amountOut={v.amount_out} minAmountOut={v.min_amount_out} timeEstimate={v.time_estimate}")
+    print(f"\nraw response (recipient hidden):\n{redact(issued.response, hidden)}")
+    print(f"\nchecked at {iso(utc_now())}. The recipient is hidden above and lives only in your .env.")
+    return 0
+
+
+def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, models_fn=list_models, oneclick=None) -> int:
     parser = argparse.ArgumentParser(prog="leash_agent", description="LEASH agent runtime")
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -35,9 +79,18 @@ def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, mod
         help="llm mode: ask the model this many times per attack; extra samples only record the decision "
         "(set LEASH_TEMPERATURE above 0, or every sample is the same)",
     )
+    toks = sub.add_parser("intents-tokens", help="list tokens supported by 1Click (live)")
+    toks.add_argument("--symbol")
+    toks.add_argument("--chain")
+    dry = sub.add_parser("intents-dry", help="ask 1Click for a dry quote (no deposit address, no funds)")
+    dry.add_argument("--amount", required=True, help="NEAR to swap, for example 0.5")
     args = parser.parse_args(argv)
 
-    cfg = cfg or Config.from_env()
+    try:
+        cfg = cfg or Config.from_env()
+    except EnvFileError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     vault = vault or Vault(cfg)
     pays = (args.command == "attack") or (args.command == "run" and not args.dry_run)
     if pays and cfg.network != "testnet" and not os.environ.get("LEASH_ALLOW_NON_TESTNET"):
@@ -48,6 +101,10 @@ def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, mod
         )
         return 1
     try:
+        if args.command == "intents-tokens":
+            return intents_tokens(args.symbol, args.chain, oneclick or OneClick.from_env())
+        if args.command == "intents-dry":
+            return intents_dry(cfg, vault, args.amount, oneclick or OneClick.from_env())
         if args.command == "check":
             allowed, denied = vault.stats()
             print(f"vault: {cfg.vault}\nagent: {cfg.agent}\npayee: {cfg.payee}")

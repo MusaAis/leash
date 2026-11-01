@@ -2,6 +2,20 @@
 
 All notable changes are listed here. Versions follow semantic versioning.
 
+## [0.3.0] - 2026-11-01
+### Added
+- NEAR Intents (1Click) dry quotes: `agent/leash_agent/intents.py` (client, request builder, answer check) and `guardian.py` (route id and amount in, checked quote out, private log, rate limit). `make intents-tokens` and `make intents-dry`. No funds move. See `docs/intents.md`.
+- Live dry quotes on mainnet at nine sizes from 0.5 to 0.001 NEAR, recorded in `docs/intents.md`.
+- Tests: 161 agent tests (127 before).
+### Security
+- A repeated key in `.env` is an error that names the key and the lines, never a value. A value already set in the environment still wins.
+- The guardian accepts one recorded 1Click fee entry (20 bps) and rejects every other fee, recipient, refund or asset change in a quote answer.
+### Changed
+- Mainnet account names end in `.near` (was `.mainnet`).
+- `docs/security.md` and the README no longer announce an ownership transfer: there is none.
+### Fixed
+- Requests to 1Click use a named user agent. The default Python agent is blocked (HTTP 403, Cloudflare 1010).
+
 ## [0.2.3] - 2026-11-01
 ### Security
 - An attack run first reads the vault (policy, pauses, allowlist, room under the caps, balance) and stops with exit code 3, sending nothing, if the run could prove nothing. Every vault answer is compared with what the policy predicts; a difference marks the run as invalid. (A-004.)

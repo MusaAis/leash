@@ -7,10 +7,23 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+class EnvFileError(ValueError):
+    """The .env file is not usable. The message never contains a value."""
+
+
 def load_env_file(path: Path) -> None:
     """Load KEY=VALUE lines into the environment without overriding existing values."""
     if not path.is_file():
         return
+    seen: dict[str, list[int]] = {}
+    for number, raw in enumerate(path.read_text().splitlines(), 1):
+        line = raw.strip()
+        if line and not line.startswith("#") and "=" in line:
+            seen.setdefault(line.partition("=")[0].strip(), []).append(number)
+    repeated = {key: rows for key, rows in seen.items() if len(rows) > 1}
+    if repeated:
+        details = "; ".join(f"{key} on lines {', '.join(map(str, rows))}" for key, rows in sorted(repeated.items()))
+        raise EnvFileError(f"{path.name} repeats a key: {details}. Keep one line per key.")
     for raw in path.read_text().splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -20,6 +33,9 @@ def load_env_file(path: Path) -> None:
         if value[:1] not in ('"', "'"):
             value = value.split(" #", 1)[0].strip()  # an unquoted value ends at an inline comment
         os.environ.setdefault(key.strip(), value.strip('"').strip("'"))
+
+
+ACCOUNT_SUFFIX = {"mainnet": "near", "testnet": "testnet"}
 
 
 @dataclass(frozen=True)
@@ -42,14 +58,15 @@ class Config:
         load_env_file(root / ".env")
         network = os.environ.get("NETWORK", "testnet")
         prefix = os.environ.get("LEASH_PREFIX", "leashdemo")
+        suffix = ACCOUNT_SUFFIX.get(network, network)  # mainnet accounts end in .near, not .mainnet
         return cls(
             network=network,
-            vault=f"{prefix}-vault.{network}",
-            owner=f"{prefix}-owner.{network}",
-            agent=f"{prefix}-agent.{network}",
-            payee=f"{prefix}-payee.{network}",
-            attacker=f"{prefix}-attacker.{network}",
-            lookalike=f"{prefix}-paye3.{network}",
+            vault=f"{prefix}-vault.{suffix}",
+            owner=f"{prefix}-owner.{suffix}",
+            agent=f"{prefix}-agent.{suffix}",
+            payee=f"{prefix}-payee.{suffix}",
+            attacker=f"{prefix}-attacker.{suffix}",
+            lookalike=f"{prefix}-paye3.{suffix}",
             ai_base_url=os.environ.get("NEAR_AI_BASE_URL", "https://cloud-api.near.ai/v1"),
             ai_model=os.environ.get("NEAR_AI_MODEL", "zai-org/GLM-5.1-FP8"),
             ai_api_key=os.environ.get("NEAR_AI_API_KEY") or None,
