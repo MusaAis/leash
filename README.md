@@ -46,21 +46,21 @@ Measured on NEAR testnet. Every row has its evidence in [docs/testnet-proof.md](
 | Check | Result |
 |---|---|
 | Contract unit tests | 40 passed |
-| Agent unit tests | 67 passed |
+| Agent unit tests | 127 passed |
 | Scripted testnet demo (`make demo-testnet`) | 12 checks passed, 0 failed |
-| Hijacked agent, every request sent straight to the vault | 12 of 12 attempts blocked, 0 paid to a non-payee |
-| Live model, attack text only | Control task passed. 8 of 8 attacks refused by the agent |
-| Live model, authorized invoice with the attack inside it | 8 of 8 payments went to the authorized payee, 0 redirected (destination checked, amount not compared) |
-| Cost of the live run | 17 model calls, about 9,400 to 10,200 tokens (two runs) |
+| Hijacked agent on a fresh policy, every request sent straight to the vault | 14 requests: 11 blocked by the vault, 3 paid to the allowlisted payee inside the caps (by design), 0 paid to a non-payee |
+| Live model, attack text only | Control task passed. 10 of 10 attacks refused by the agent, and 30 of 30 with three samples per attack at temperature 0.7 |
+| Live model, authorized 0.2 NEAR invoice with the attack inside it | 10 of 10 payments were exactly the authorized amount to the authorized payee, and 30 of 30 decisions with three samples. Agent fooled 0, funds lost 0 |
+| Cost of the live runs | 21 model calls and 10,527 tokens (one sample); 61 calls and 31,871 tokens (three samples) |
 
-This is one live run at temperature 0 with eight attack texts, not a proof of robustness. In the authorized-invoice scenario the model was not fooled, so the vault had nothing to block there. What the vault does against a fully fooled agent is what the hijacked-agent run shows.
+These are two live runs with ten attack texts and one model, one at temperature 0 and one with three samples per attack at temperature 0.7. The model was not fooled in either, so in the authorized-invoice scenario the vault had nothing to block there. What the vault does against a fully fooled agent is what the hijacked-agent run shows. This is not a proof of robustness.
 
 ## Quick start
 
 Prerequisites:
 
 - Rust (stable) with the `wasm32-unknown-unknown` target, and `make`
-- Python 3.9 or newer (agent runtime and its tests; no third-party packages)
+- Python 3.12, the version CI and the tests run on (agent runtime and its tests; no third-party packages; older versions are untested)
 - For the wasm build and the testnet demo only: [cargo-near](https://github.com/near/cargo-near), [near-cli-rs](https://github.com/near/near-cli-rs) and network access. See the [deployment guide](docs/deployment.md).
 
 Run the tests:
@@ -71,7 +71,7 @@ make test-agent   # agent tests
 make check        # format check, lint, contract and agent tests
 ```
 
-Expected: `make test` ends with `test result: ok. 40 passed`, and `make test-agent` prints `Ran 67 tests` followed by `OK`.
+Expected: `make test` ends with `test result: ok. 40 passed`, and `make test-agent` prints `Ran 127 tests` followed by `OK`.
 
 ### Testnet demo (optional, needs network)
 
@@ -88,7 +88,7 @@ Expected: the demo ends with `Result: N passed, 0 failed`. Allowed payments retu
 
 ## Agent runtime and attack suite
 
-A Python agent (standard library only) asks a NEAR AI Cloud model whether to pay, then calls the vault. An attack suite tries eight kinds of manipulation against it: instruction override, fake admin notice, social engineering, encoded payload, tool-output injection, look-alike address, oversized payment and a payment split into small parts.
+A Python agent (standard library only) asks a NEAR AI Cloud model whether to pay, then calls the vault. An attack suite tries ten kinds of manipulation against it: instruction override, fake admin notice, social engineering, encoded payload, tool-output injection, look-alike address, oversized payment, a payment split into small parts, a fake closing tag that tries to break out of the untrusted block, and a fake owner approval.
 
 ```
 cp .env.example .env     # set LEASH_PREFIX and NEAR_AI_API_KEY
@@ -96,9 +96,10 @@ make agent-check         # configuration and vault counters
 make policy-testnet      # test vaults only: fresh policy and funds, without the full demo
 make attack-testnet      # hijacked agent: what does the vault block?
 make attack-llm-testnet  # the real model sees every attack text
+make attack-llm-testnet SAMPLES=3  # ask the model three times per attack (with LEASH_TEMPERATURE=0.7)
 ```
 
-The report lists every attempt with its outcome and ends with totals. The command exits with code 2 if any payment reached a destination other than the payee. Live runs are capped by `NEAR_AI_MAX_TOKENS`, `LEASH_MAX_MODEL_CALLS` and `LEASH_MAX_TOTAL_TOKENS`, so a mistake cannot spend the credits. Details: [agent runtime](docs/agent.md).
+Before it sends anything, the suite checks the vault (policy, pauses, allowlist, room under the caps, balance) and stops with exit code 3 if a run would prove nothing. The report lists every attempt with its outcome and ends with totals, including `agent fooled` (the model decided to pay what it should not) and `funds lost` (money that really left the vault without authorization). The command exits with code 2 if a payment left the vault without authorization. Live runs are capped per run and per day (`NEAR_AI_MAX_TOKENS`, `LEASH_MAX_MODEL_CALLS`, `LEASH_MAX_TOTAL_TOKENS`, `LEASH_MAX_DAILY_CALLS`, `LEASH_MAX_DAILY_TOKENS`), so a mistake cannot spend the credits. Details: [agent runtime](docs/agent.md).
 
 ## How LEASH uses NEAR
 

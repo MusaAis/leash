@@ -1,0 +1,128 @@
+import http.server
+import importlib.util
+import json
+import os
+import subprocess
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+_spec = importlib.util.spec_from_file_location("full_access_keys", ROOT / "scripts" / "full_access_keys.py")
+fak = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(fak)
+
+
+def answer(*perms):
+    keys = [{"public_key": f"ed25519:K{i}", "access_key": {"nonce": i, "permission": p}} for i, p in enumerate(perms)]
+    return {"jsonrpc": "2.0", "id": "leash", "result": {"keys": keys, "block_height": 1}}
+
+
+FUNCTION_CALL = {"FunctionCall": {"allowance": "1", "receiver_id": "v.testnet", "method_names": ["pause_all"]}}
+
+
+class RiskyKeys(unittest.TestCase):
+    def test_only_non_function_call_keys_are_listed(self):
+        self.assertEqual(fak.risky_keys(answer("FullAccess", FUNCTION_CALL, "FullAccess")), ["ed25519:K0", "ed25519:K2"])
+        self.assertEqual(fak.risky_keys(answer(FUNCTION_CALL)), [])
+        self.assertEqual(fak.risky_keys(answer()), [])
+
+    def test_an_unknown_permission_is_never_treated_as_safe(self):
+        self.assertEqual(fak.risky_keys(answer({"GasKey": {}}, "Mystery")), ["ed25519:K0", "ed25519:K1"])
+
+    def test_unreadable_answers_raise_instead_of_passing(self):
+        for bad in (None, [], {}, {"error": {"name": "UNKNOWN_ACCOUNT"}}, {"result": {}}, {"result": {"keys": "x"}},
+                    {"result": {"keys": [{"public_key": "k"}]}}):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                fak.risky_keys(bad)
+
+    def test_non_https_endpoint_is_refused(self):
+        old = os.environ.get("LEASH_RPC_URL")
+        os.environ["LEASH_RPC_URL"] = "http://rpc.example"
+        try:
+            with self.assertRaises(ValueError):
+                fak.fetch("v.testnet", "testnet")
+        finally:
+            os.environ.pop("LEASH_RPC_URL")
+            if old is not None:
+                os.environ["LEASH_RPC_URL"] = old
+
+
+class _FakeRpc(http.server.BaseHTTPRequestHandler):
+    flag = ""  # path of a file; once it exists the full-access key is "deleted"
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        deleted = Path(type(self).flag).exists()
+        body = json.dumps(answer(FUNCTION_CALL) if deleted else answer("FullAccess", FUNCTION_CALL)).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+class LockVaultScript(unittest.TestCase):
+    """Runs scripts/lock-vault.sh with a fake `near` and a fake RPC. Nothing real is touched."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        tmp = Path(self.tmp.name)
+        self.flag = tmp / "deleted"
+        _FakeRpc.flag = str(self.flag)
+        self.server = http.server.HTTPServer(("127.0.0.1", 0), _FakeRpc)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        (tmp / "bin").mkdir()
+        near = tmp / "bin" / "near"
+        near.write_text(f'#!/usr/bin/env bash\necho "$@" >> "{tmp}/near.log"\n'
+                        f'[ "$2" = "delete-keys" ] && [ "$NEAR_FAKE_DELETE" = "1" ] && touch "{self.flag}"\nexit 0\n')
+        near.chmod(0o755)
+        self.log = tmp / "near.log"
+
+    def run_script(self, stdin, delete=True):
+        env = dict(os.environ, PATH=f"{self.tmp.name}/bin:{os.environ['PATH']}", LEASH_PREFIX="t", LEASH_LOCK_WAIT="0",
+                   LEASH_RPC_URL=f"http://127.0.0.1:{self.server.server_port}",
+                   NEAR_FAKE_DELETE="1" if delete else "0")
+        return subprocess.run(["bash", str(ROOT / "scripts" / "lock-vault.sh")], input=stdin, text=True,
+                              capture_output=True, env=env, timeout=60)
+
+    def test_deleting_the_key_is_verified_from_the_rpc(self):
+        proc = self.run_script("ed25519:K0\nt-vault.testnet\n")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("Verified: no full-access key remains", proc.stdout)
+        self.assertIn("delete-keys", self.log.read_text())
+
+    def test_a_key_that_is_not_full_access_is_refused_before_anything_is_sent(self):
+        proc = self.run_script("ed25519:K1\nt-vault.testnet\n")  # K1 is the function-call key
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("not a full-access key", proc.stdout)
+        self.assertFalse(self.log.exists())
+
+    def test_a_wrong_confirmation_cancels(self):
+        proc = self.run_script("ed25519:K0\nwrong\n")
+        self.assertEqual(proc.returncode, 1)
+        self.assertFalse(self.log.exists())
+
+    def test_if_the_key_is_still_there_the_script_fails(self):
+        proc = self.run_script("ed25519:K0\nt-vault.testnet\n", delete=False)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("still has a full-access key", proc.stdout)
+
+    def test_an_unreadable_rpc_stops_the_script_without_changes(self):
+        env = dict(os.environ, PATH=f"{self.tmp.name}/bin:{os.environ['PATH']}", LEASH_PREFIX="t",
+                   LEASH_RPC_URL="http://127.0.0.1:1")
+        proc = subprocess.run(["bash", str(ROOT / "scripts" / "lock-vault.sh")], input="ed25519:K0\nt-vault.testnet\n",
+                              text=True, capture_output=True, env=env, timeout=60)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("Could not read the key list", proc.stderr)
+        self.assertFalse(self.log.exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

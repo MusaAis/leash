@@ -140,18 +140,40 @@ class VaultClient(unittest.TestCase):
         with self.assertRaises(ChainError):
             vault.spend("p.testnet", "1")
 
-    def test_daily_headroom(self):
-        policy = ('Function execution return value (printed to stdout):\n'
-                  '{"daily_cap": "3000000000000000000000000", "spent_in_window": "2800000000000000000000000"}\n\n\n'
-                  'Here is your console command')
-        vault = Vault(make_config(), runner=lambda args: policy)
-        self.assertEqual(vault.daily_headroom_yocto(), 200000000000000000000000)
+    def test_snapshot_reads_policy_pause_flag_and_balance(self):
+        values = {
+            "get_policy": {"per_tx_cap": "1000000000000000000000000", "daily_cap": "3000000000000000000000000",
+                           "spent_in_window": "200000000000000000000000", "window_start_ns": "1",
+                           "allowlist": ["p.testnet"], "paused": False},
+            "is_paused_all": False,
+            "get_available_balance": "5000000000000000000000000",
+        }
+        seen = []
 
-    def test_headroom_without_policy_is_none(self):
+        def runner(args):
+            seen.append(args[5])
+            return "" + STDOUT_SENTINEL + json.dumps(values[args[5]])
+
+        snap = Vault(make_config(), runner=runner).snapshot()
+        self.assertEqual(seen, ["get_policy", "is_paused_all", "get_available_balance"])
+        self.assertEqual((snap.per_tx_cap, snap.daily_cap, snap.spent), (10**24, 3 * 10**24, 2 * 10**23))
+        self.assertEqual(snap.allowlist, ("p.testnet",))
+        self.assertEqual((snap.agent_paused, snap.all_paused, snap.balance), (False, False, 5 * 10**24))
+
+    def test_snapshot_without_a_policy_explains_what_to_do(self):
         empty = 'Function execution return value (printed to stdout):\nnull\n\n\nHere is your console command'
-        vault = Vault(make_config(), runner=lambda args: empty)
+        with self.assertRaises(ChainError) as ctx:
+            Vault(make_config(), runner=lambda args: empty).snapshot()
+        self.assertIn("make policy-testnet", str(ctx.exception))
+
+    def test_snapshot_with_a_malformed_policy_raises_chain_error(self):
+        runner = lambda args: "" + STDOUT_SENTINEL + json.dumps({"per_tx_cap": "x"})  # noqa: E731
         with self.assertRaises(ChainError):
-            vault.daily_headroom_yocto()
+            Vault(make_config(), runner=runner).snapshot()
+
+    def test_allowed_event_is_detected(self):
+        self.assertTrue(parse_call_output(SPEND_TRUE).allowed_event)
+        self.assertFalse(parse_call_output(SPEND_FALSE).allowed_event)
 
     def test_stats(self):
         vault = Vault(make_config(), runner=lambda args: VIEW_STATS)
