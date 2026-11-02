@@ -45,7 +45,7 @@ Measured on NEAR testnet. Every row has its evidence in [docs/testnet-proof.md](
 
 | Check | Result |
 |---|---|
-| Contract unit tests | 112 passed |
+| Contract unit tests | 114 passed |
 | Agent unit tests | 211 passed |
 | 1Click dry quotes against the live mainnet API, no funds, no LEASH contract on mainnet | 9 sizes from 0.5 to 0.001 NEAR passed the guardian's checks, see [docs/intents.md](docs/intents.md) |
 | Scripted testnet demo (`make demo-testnet`) | 12 checks passed, 0 failed |
@@ -72,7 +72,7 @@ make test-agent   # agent tests
 make check        # format check, lint, contract and agent tests
 ```
 
-Expected: `make test` ends with `test result: ok. 112 passed`, and `make test-agent` prints `Ran 211 tests` followed by `OK`.
+Expected: `make test` ends with `test result: ok. 114 passed`, and `make test-agent` prints `Ran 211 tests` followed by `OK`.
 
 ### Testnet demo (optional, needs network)
 

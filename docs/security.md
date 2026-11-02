@@ -30,10 +30,12 @@ The agent account holds only gas money; funds stay in the vault. Model output is
 - Only native NEAR is spent by the vault. Token and cross-chain payments are not part of this release.
 - The guardian's quote checks run off the chain. See [intents](intents.md).
 - A compromised guardian can approve intents up to the agent's per-transaction and daily caps. The allowlist does not apply to intents. Routes are records that the guardian enforces, not the contract. Moving funds to a wrong deposit address needs a compromised guardian and a compromised agent at the same time, inside the caps and a 30-minute approval window.
+- Each `spend_intent` also attaches up to two storage deposits of 0.00125 NEAR each to wNEAR (the first is refunded if the vault is already registered). They are not counted in the daily cap.
+- The events `intent_sent` and `unwrapped` record the request, not the result: they are written before the batch runs. A failed batch leaves the event on the chain and the cap consumed. Evidence of a swap is the wNEAR receipts and the vault balance, never the event alone.
 - `spend_intent` counts the amount in the daily cap before the batch runs and does not roll it back. There is no settle callback: a failed swap deposit does not return the cap.
 - Changing the intents configuration (`set_intents_config`, even with the same values) revokes every pending approval. `set_routes` clears the approvals of that agent only; it does not change the configuration epoch.
 - The agent must attach enough gas for `spend_intent`; below the minimum it panics and nothing is counted. The gas numbers are placeholders until measured in a rehearsal.
-- Routes (asset and recipient) are recorded on the chain for the owner and the guardian to read. The vault never sees a swap's destination, so it cannot check that a quote pays the recorded recipient: that check is the guardian's (planned contract 0.2.0, see [ADR 0005](adr/0005-intents-design-and-trust.md)).
+- Routes (asset and recipient) are recorded on the chain for the owner and the guardian to read. The vault never sees a swap's destination, so it cannot check that a quote pays the recorded recipient: that check is the guardian's. The contract is unit-tested; a live swap is pending (see [ADR 0005](adr/0005-intents-design-and-trust.md)).
 - Contract 0.2.0 changes the state layout and has no `migrate`: it is deployed fresh, never over an older vault.
 
 ## Exit path

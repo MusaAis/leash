@@ -2408,4 +2408,46 @@ mod tests {
         gas_ctx(&owner, T0, 1, MIN_UNWRAP_GAS_TGAS - 1);
         let _ = c.unwrap(U128(NEAR));
     }
+
+    #[test]
+    fn policy_change_after_approval_is_enforced_at_spend_time() {
+        let (mut c, owner, agent) = intents_setup();
+        approve(&mut c, &agent, 2 * NEAR, T0 + 10 * MIN_NS);
+        owner_ctx(&owner, T0);
+        c.set_policy(agent.clone(), U128(NEAR), U128(5 * NEAR), vec![accounts(2)]);
+        assert!(!intent(&mut c, &agent, 2 * NEAR, T0));
+        assert!(intent_denied_with("over_per_tx_cap"));
+        set_ctx(&agent, T0);
+        assert_eq!(c.get_approvals(agent.clone()).len(), 1);
+        // lower daily cap below spent + amount
+        owner_ctx(&owner, T0);
+        c.set_policy(
+            agent.clone(),
+            U128(2 * NEAR),
+            U128(5 * NEAR),
+            vec![accounts(2)],
+        );
+        set_ctx(&agent, T0);
+        assert!(c.spend(accounts(2), U128(2 * NEAR), None));
+        owner_ctx(&owner, T0);
+        c.set_policy(
+            agent.clone(),
+            U128(2 * NEAR),
+            U128(3 * NEAR),
+            vec![accounts(2)],
+        );
+        assert!(!intent(&mut c, &agent, 2 * NEAR, T0));
+        assert!(intent_denied_with("over_daily_cap"));
+        set_ctx(&agent, T0);
+        assert_eq!(c.get_approvals(agent.clone()).len(), 1);
+    }
+
+    #[test]
+    fn allowlist_does_not_apply_to_intents() {
+        let (mut c, owner, agent) = intents_setup();
+        owner_ctx(&owner, T0);
+        c.set_policy(agent.clone(), U128(2 * NEAR), U128(5 * NEAR), vec![]);
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        assert!(intent(&mut c, &agent, NEAR, T0));
+    }
 }
