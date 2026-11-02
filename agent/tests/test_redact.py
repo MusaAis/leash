@@ -28,6 +28,14 @@ class Scrub(unittest.TestCase):
             text = scrub(f"a {RECIPIENT.upper()} b {REFUND.lower()} c {RECIPIENT}")
         self.assertEqual(text, "a <RECIPIENT> b <REFUND_TO> c <RECIPIENT>")
 
+    def test_hides_the_value_without_its_prefix_and_percent_encoded(self):
+        recipient = "0xAbCdEf0123456789"
+        refund = "refund account@near"
+        env = {"LEASH_ROUTE_RECIPIENT": recipient, "LEASH_DRY_REFUND_TO": refund}
+        with mock.patch.dict("os.environ", env):
+            text = scrub(f"x {recipient[2:]} y {recipient[2:].lower()} z refund%20account%40near w REFUND%20ACCOUNT%40NEAR")
+        self.assertEqual(text, "x <RECIPIENT> y <RECIPIENT> z <REFUND_TO> w <REFUND_TO>")
+
     def test_nothing_set_changes_nothing(self):
         with mock.patch.dict("os.environ", {}, clear=True):
             self.assertEqual(scrub("plain text"), "plain text")

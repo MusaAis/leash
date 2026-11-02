@@ -29,6 +29,8 @@ The agent account holds only gas money; funds stay in the vault. Model output is
 - Prompt-injection results are evidence about one model and ten attack texts, not a guarantee. The vault policy, not the model, is the security boundary.
 - Only native NEAR is spent by the vault. Token and cross-chain payments are not part of this release.
 - The guardian's quote checks run off the chain and move no funds in this release. See [intents](intents.md).
+- Routes (asset and recipient) are recorded on the chain for the owner and the guardian to read. The vault never sees a swap's destination, so it cannot check that a quote pays the recorded recipient: that check is the guardian's (planned contract 0.2.0, see [ADR 0005](adr/0005-intents-design-and-trust.md)).
+- Contract 0.2.0 changes the state layout and has no `migrate`: it is deployed fresh, never over an older vault.
 
 ## Exit path
 

@@ -1,6 +1,6 @@
 SAMPLES ?= 1
 AMOUNT ?= 0.5
-.PHONY: test build fmt lint check check-docs test-agent agent-models agent-dry accounts-testnet deploy-testnet demo-testnet lock-vault-testnet policy-testnet agent-check agent-run attack-testnet attack-llm-testnet intents-tokens intents-dry intents-wet-probe wrap-storage agent-signature
+.PHONY: test build fmt lint check check-docs test-agent agent-models agent-dry accounts-testnet deploy-testnet demo-testnet lock-vault-testnet policy-testnet agent-check agent-run attack-testnet attack-llm-testnet intents-tokens intents-dry intents-wet-probe wrap-storage agent-signature guard
 
 test:
 	cd contract && cargo test
@@ -69,3 +69,7 @@ wrap-storage:
 
 intents-wet-probe:
 	cd agent && python3 -m leash_agent intents-wet-probe $(if $(PROBE_AMOUNT),--amount $(PROBE_AMOUNT)) --yes
+
+NETWORK ?= testnet
+guard:
+	cd agent && python3 -m leash_agent guard --network $(NETWORK) $(ACCOUNTS)

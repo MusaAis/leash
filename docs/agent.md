@@ -67,6 +67,8 @@ During the run, every vault answer is compared with what the policy predicts, us
 
 The pay commands (`attack`, and `run` without `--dry-run`) refuse any network other than testnet unless `LEASH_ALLOW_NON_TESTNET=1` is set (exactly `1`; any other value refuses).
 
+`make guard NETWORK=mainnet ACCOUNTS="a.near b.near"` runs the shared account check from the repository root (mainnet also needs `LEASH_ALLOW_MAINNET=1` for that one command). It is not yet called by the scripts.
+
 ## How the model's answer is read
 
 The reply must be exactly one JSON object with the keys `action`, `to`, `amount_near`, `memo` or `reason`, optionally after one closed `<think>` block and inside one code fence. Text around it, two objects, an unclosed `<think>` block or unknown keys are refused. The model's reasoning text (`reasoning_content`) is never used, and a reply that was cut off is never parsed. Amounts must be plain decimals such as `0.5`. Memos are cleaned of control characters and cut to 100 bytes. The transaction id is read only from the CLI's own `Transaction ID:` line, so text inside a memo cannot fake it.

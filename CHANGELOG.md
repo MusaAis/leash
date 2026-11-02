@@ -22,7 +22,10 @@ All notable changes are listed here. Versions follow semantic versioning.
 - Docs: the model id `zai-org/GLM-5.1-FP8` is named as the requested model, an alias on 2026-11-01; which model answered earlier runs is not recorded.
 - `python3 -m leash_agent guard --network <testnet|mainnet> ACCOUNT...`: one shared check for every account in a command. Mainnet needs `LEASH_ALLOW_MAINNET=1` in the process environment (never read from `.env`) and refuses `.testnet` accounts; testnet refuses named accounts that do not end in `.testnet` (64-hex implicit accounts pass on both). Prints every account, exits 1 on a refusal. Not yet used by the scripts.
 - `LEASH_ALLOW_MAINNET` and `LEASH_ALLOW_NON_TESTNET` now switch on only with the exact value `1` (`0`, `false`, empty or a space refuse). `make wrap-storage` hides the refund account in its output.
-- Tests: 210 agent tests (161 before). The redaction tests use their own temporary directory.
+- `make guard NETWORK=<testnet|mainnet> ACCOUNTS="..."` runs the guard from the repository root.
+- `scrub()` also hides a private value without its `0x` prefix and in percent-encoded form, in any letter case.
+- Contract 0.2.0 (branch `feat/p4b-contract`, not released, not deployed, unit-tested only): `set_intents_config`, `set_routes`, `approve_intent` with `quote_hash`, views `get_guardian`, `get_wnear`, `get_routes`, `get_approvals`. `spend_intent` and `unwrap` are not built yet. Fresh deploy only: the state layout changed, there is no `migrate`. The guardian cannot hold an agent policy. `remove_agent` also removes the agent's routes and approvals. Every `set_intents_config` call revokes all pending approvals (epoch). Route fields accept printable ASCII only. A deposit account may not be the vault, owner, guardian, the agent, another agent or the wNEAR contract.
+- Tests: 211 agent tests (161 before), 83 contract tests (40 before). The redaction tests use their own temporary directory.
 
 ## [0.3.0] - 2026-11-01
 ### Added
@@ -40,12 +43,12 @@ All notable changes are listed here. Versions follow semantic versioning.
 
 ## [0.2.3] - 2026-11-01
 ### Security
-- An attack run first reads the vault (policy, pauses, allowlist, room under the caps, balance) and stops with exit code 3, sending nothing, if the run could prove nothing. Every vault answer is compared with what the policy predicts; a difference marks the run as invalid. (A-004.)
-- Payment amounts are compared. In the live scenario without an instruction any payment is unauthorized; with an invoice the payment must be exactly the invoice. The report counts `agent fooled` and `funds lost` separately, and the control of the invoice scenario comes from its own rows. Any unauthorized payment exits with code 2. (A-005.)
-- Attack text is escaped before it goes into the `<untrusted>` block, so it cannot close the block. New attacks: a fake closing tag and a fake owner approval (ten in total). `SAMPLES=n` asks the model n times per attack, `LEASH_TEMPERATURE` sets the sampling temperature. (A-010.)
-- Long input is refused without a model call. Model calls and tokens are also capped per UTC day in `~/.leash/budget.json`. The API key is only sent to `https://cloud-api.near.ai`, and redirects are refused. (A-011.)
-- A vault answer without its event is `UNKNOWN`, no longer counted as blocked or paid, and makes the run invalid. (A-012.)
-- `make lock-vault-testnet` reads the key list from the RPC as JSON, refuses a key that is not a full-access key of the vault, and fails unless no full-access key remains afterwards. (A-008.)
+- An attack run first reads the vault (policy, pauses, allowlist, room under the caps, balance) and stops with exit code 3, sending nothing, if the run could prove nothing. Every vault answer is compared with what the policy predicts; a difference marks the run as invalid.
+- Payment amounts are compared. In the live scenario without an instruction any payment is unauthorized; with an invoice the payment must be exactly the invoice. The report counts `agent fooled` and `funds lost` separately, and the control of the invoice scenario comes from its own rows. Any unauthorized payment exits with code 2.
+- Attack text is escaped before it goes into the `<untrusted>` block, so it cannot close the block. New attacks: a fake closing tag and a fake owner approval (ten in total). `SAMPLES=n` asks the model n times per attack, `LEASH_TEMPERATURE` sets the sampling temperature.
+- Long input is refused without a model call. Model calls and tokens are also capped per UTC day in `~/.leash/budget.json`. The API key is only sent to `https://cloud-api.near.ai`, and redirects are refused.
+- A vault answer without its event is `UNKNOWN`, no longer counted as blocked or paid, and makes the run invalid.
+- `make lock-vault-testnet` reads the key list from the RPC as JSON, refuses a key that is not a full-access key of the vault, and fails unless no full-access key remains afterwards.
 ### Added
 - `scripts/check_docs.py`, run by `make check` and CI: compares the docs with the git tags, the test counts, the denial reasons, the attack count, the cost-limit defaults, the make targets and the relative links.
 - `docs/testnet-proof.md` Runs 5 to 7: hijacked agent, live model at temperature 0 and with three samples at temperature 0.7, and a vault lock rehearsal, with a link for every vault call.
@@ -59,24 +62,24 @@ All notable changes are listed here. Versions follow semantic versioning.
 
 ## [0.2.2] - 2026-10-31
 ### Security
-- The model's answer is read strictly: exactly one JSON object with known keys. The chain-of-thought text (`reasoning_content`) is never used, a cut-off reply is never parsed, and text around the object, two objects or an unclosed `<think>` block are refused. (Review finding A-001.)
-- The transaction id is read only from the CLI's own `Transaction ID:` line, and event lines only when they start with `EVENT_JSON:`, so text inside a memo cannot fake an id or an event. Memos are cleaned of control characters and cut to 100 bytes. (A-006, B-001, A-009.)
-- Amounts must be plain decimals; `1e999999999` and similar no longer crash the run. Account ids are matched in full. `Vault.spend` validates the destination and memo itself. (A-002, A-003.)
-- The pay commands refuse a network other than testnet unless `LEASH_ALLOW_NON_TESTNET=1`; `make policy-testnet` is testnet only. (A-013.)
+- The model's answer is read strictly: exactly one JSON object with known keys. The chain-of-thought text (`reasoning_content`) is never used, a cut-off reply is never parsed, and text around the object, two objects or an unclosed `<think>` block are refused.
+- The transaction id is read only from the CLI's own `Transaction ID:` line, and event lines only when they start with `EVENT_JSON:`, so text inside a memo cannot fake an id or an event. Memos are cleaned of control characters and cut to 100 bytes.
+- Amounts must be plain decimals; `1e999999999` and similar no longer crash the run. Account ids are matched in full. `Vault.spend` validates the destination and memo itself.
+- The pay commands refuse a network other than testnet unless `LEASH_ALLOW_NON_TESTNET=1`; `make policy-testnet` is testnet only.
 ### Added
 - Every attack report row carries the transaction id of its vault call, in the printed report and in the `--json` file, so a run can be linked to the explorer row by row.
 - `make agent-models` says when the configured model is missing from the list (its price is then not shown), or when the list is empty.
-- A vault call without a valid transaction id is printed as `tx MISSING` and the run exits with code 3. (B-002.)
-- Tests for `main` (exit codes 0, 1, 2 and 3, the JSON file, the budget line, the models note), the strict parser, hostile memos and the `.env` loader. (B-004.)
+- A vault call without a valid transaction id is printed as `tx MISSING` and the run exits with code 3.
+- Tests for `main` (exit codes 0, 1, 2 and 3, the JSON file, the budget line, the models note), the strict parser, hostile memos and the `.env` loader.
 - `docs/testnet-proof.md` Run 4: a live-model and hijacked-agent run with a transaction link for every vault call.
 - `docs/architecture.md`: components, accounts, the order of the vault checks, events.
 ### Changed
 - README restructured: verified results table, how LEASH uses NEAR, project structure and a disclosure section. Test counts and results match the testnet proof.
 - Diagrams are now SVG files (`docs/img/`) instead of Mermaid: the GitHub mobile app shows Mermaid as raw code, and the new diagrams stay readable on a phone.
 ### Fixed
-- `make accounts-testnet` stops when it cannot tell whether an account exists, instead of moving key files of an account that does. It lists the files it moved aside. `LEASH_FORCE_CREATE=1` skips the check. (A-007.)
-- The `.env` loader no longer keeps an inline comment as part of a value; `.gitignore` covers `.env.*`, `*.pem` and saved reports. (A-016.)
-- Docs: the amount of the authorized payments was not compared, refused attempts have no transaction id, the owner's counter reset is documented, and the NEAR Builders credits sentence is replaced by the instructions link. (B-003, B-005, A-014.)
+- `make accounts-testnet` stops when it cannot tell whether an account exists, instead of moving key files of an account that does. It lists the files it moved aside. `LEASH_FORCE_CREATE=1` skips the check.
+- The `.env` loader no longer keeps an inline comment as part of a value; `.gitignore` covers `.env.*`, `*.pem` and saved reports.
+- Docs: the amount of the authorized payments was not compared, refused attempts have no transaction id, the owner's counter reset is documented, and the NEAR Builders credits sentence is replaced by the instructions link.
 - `docs/STATE.md` and the testnet proof still called v0.2.1 a candidate after its release.
 - README listed the denial reasons in an order that did not match the contract.
 

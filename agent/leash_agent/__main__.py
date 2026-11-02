@@ -111,7 +111,7 @@ def wrap_storage(accounts: list[str], post=None) -> int:
 
 
 def agent_signature(cfg, models, check=check_signature) -> int:
-    """F-1: ask each model one question and report the signature kind. Never verifies the signature."""
+    """Signature kind test: ask each model one question and report the signature kind. Never verifies the signature."""
     if not cfg.ai_api_key:
         raise RuntimeError("set NEAR_AI_API_KEY in .env")
     log = GuardianLog.from_env()
@@ -151,7 +151,7 @@ def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, mod
     gd = sub.add_parser("guard", help="check that every account fits the network (mainnet needs LEASH_ALLOW_MAINNET=1)")
     gd.add_argument("--network", required=True)
     gd.add_argument("accounts", nargs="+")
-    sig = sub.add_parser("agent-signature", help="F-1: which signature kind does the gateway give a model's answer?")
+    sig = sub.add_parser("agent-signature", help="which signature kind does the gateway give a model's answer?")
     sig.add_argument("--model", action="append", default=[], help="model id (repeatable; default: the configured model and z-ai/glm-5.3)")
     args = parser.parse_args(argv)
 

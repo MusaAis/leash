@@ -45,6 +45,10 @@ The script lists the vault's full-access keys (read from the RPC as JSON; `LEASH
 
 Locking removes upgrades, not the owner's exit: `withdraw` stays available to the owner and is not blocked by pause. After locking, a bug in the contract cannot be patched in place.
 
+## Guardian key (contract 0.2.0, not released)
+
+The guardian is a separate account. Its key is a function-call key limited to the vault and the single method `approve_intent`, with a small gas allowance. `approve_intent` takes no deposit, so a full-access key is not needed. Rotating the guardian with `set_intents_config` revokes every pending approval.
+
 ## Verification checklist
 
 - `get_owner` returns the intended owner.

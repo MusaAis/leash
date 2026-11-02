@@ -1,4 +1,4 @@
-"""F-1 test: what kind of signature does the gateway give a model's answer? The signature is not verified here."""
+"""Signature kind test: what kind of signature does the gateway give a model's answer? The signature is not verified here."""
 
 from __future__ import annotations
 

@@ -56,6 +56,9 @@ pub struct Approval {
     pub deposit_account: AccountId,
     pub amount: u128,
     pub expires_ns: u64,
+    /// The value of `intents_epoch` when the guardian approved. A later
+    /// `set_intents_config` bumps the epoch, so this approval stops matching.
+    pub epoch: u32,
     /// sha256 of the saved 1Click answer. A guardian assertion, not enforced here.
     pub quote_hash: String,
 }
@@ -72,7 +75,7 @@ pub struct ApprovalView {
 fn valid_route_field(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_ROUTE_FIELD_BYTES
-        && !value.chars().any(|c| c.is_control())
+        && value.chars().all(|c| ('!'..='~').contains(&c))
 }
 
 fn valid_quote_hash(value: &str) -> bool {
@@ -114,6 +117,7 @@ pub struct Leash {
     denied_total: u64,
     guardian: Option<AccountId>,
     wnear: Option<AccountId>,
+    intents_epoch: u32,
     routes: LookupMap<AccountId, Vec<Route>>,
     approvals: LookupMap<AccountId, Vec<Approval>>,
 }
@@ -140,6 +144,7 @@ impl Leash {
             denied_total: 0,
             guardian: None,
             wnear: None,
+            intents_epoch: 0,
             routes: LookupMap::new(StorageKey::Routes),
             approvals: LookupMap::new(StorageKey::Approvals),
         }
@@ -283,9 +288,11 @@ impl Leash {
         );
         self.wnear = Some(wnear.clone());
         self.guardian = Some(guardian.clone());
+        // Every call revokes all pending approvals, also with unchanged values.
+        self.intents_epoch = self.intents_epoch.saturating_add(1);
         emit(
             "intents_configured",
-            json!({"wnear": wnear, "guardian": guardian}),
+            json!({"wnear": wnear, "guardian": guardian, "epoch": self.intents_epoch}),
         );
     }
 
@@ -347,7 +354,9 @@ impl Leash {
             deposit_account != env::current_account_id()
                 && deposit_account != self.owner
                 && deposit_account != guardian
-                && deposit_account != agent,
+                && deposit_account != agent
+                && self.wnear.as_ref() != Some(&deposit_account)
+                && !self.agents.contains_key(&deposit_account),
             "invalid deposit account"
         );
         require!(
@@ -355,7 +364,8 @@ impl Leash {
             "quote_hash must be 64 lowercase hex characters"
         );
         let mut pending = self.approvals.get(&agent).cloned().unwrap_or_default();
-        pending.retain(|a| a.expires_ns > now);
+        let epoch = self.intents_epoch;
+        pending.retain(|a| a.expires_ns > now && a.epoch == epoch);
         require!(
             pending.len() < MAX_PENDING_APPROVALS,
             "too many pending approvals"
@@ -365,6 +375,7 @@ impl Leash {
             deposit_account: deposit_account.clone(),
             amount: amount.0,
             expires_ns: expires_ns.0,
+            epoch,
             quote_hash: quote_hash.clone(),
         });
         self.approvals.insert(agent.clone(), pending);
@@ -487,14 +498,15 @@ impl Leash {
         self.routes.get(&agent).cloned().unwrap_or_default()
     }
 
-    /// Returns the approvals that have not expired yet.
+    /// Returns the approvals that have not expired and belong to the current epoch.
     pub fn get_approvals(&self, agent: AccountId) -> Vec<ApprovalView> {
         let now = env::block_timestamp();
+        let epoch = self.intents_epoch;
         self.approvals
             .get(&agent)
             .map(|list| {
                 list.iter()
-                    .filter(|a| a.expires_ns > now)
+                    .filter(|a| a.expires_ns > now && a.epoch == epoch)
                     .map(|a| ApprovalView {
                         route_id: a.route_id,
                         deposit_account: a.deposit_account.clone(),
@@ -1455,5 +1467,183 @@ mod tests {
         c.remove_agent(agent.clone());
         assert!(c.get_routes(agent.clone()).is_empty());
         assert!(c.get_approvals(agent).is_empty());
+    }
+
+    // ----- intents: epoch, route characters, deposit account rules -----
+
+    #[test]
+    fn rotating_the_guardian_invalidates_old_approvals() {
+        let (mut c, owner, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        assert_eq!(c.get_approvals(agent.clone()).len(), 1);
+        owner_ctx(&owner, T0);
+        c.set_intents_config(wnear(), accounts(5));
+        assert!(c.get_approvals(agent).is_empty());
+    }
+
+    #[test]
+    fn calling_config_with_the_same_values_also_revokes_approvals() {
+        let (mut c, owner, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        owner_ctx(&owner, T0);
+        c.set_intents_config(wnear(), guardian());
+        assert!(c.get_approvals(agent).is_empty());
+        assert!(get_logs()
+            .iter()
+            .any(|l| l.contains("\"event\":\"intents_configured\"") && l.contains("\"epoch\":2")));
+    }
+
+    #[test]
+    fn old_epoch_approvals_do_not_count_toward_the_limit() {
+        let (mut c, owner, agent) = intents_setup();
+        for _ in 0..5 {
+            approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        }
+        owner_ctx(&owner, T0);
+        c.set_intents_config(wnear(), guardian());
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        assert_eq!(c.get_approvals(agent.clone()).len(), 1);
+        assert_eq!(c.approvals.get(&agent).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn route_fields_must_be_printable_ascii() {
+        let bad = ["a\u{202e}b", "a\u{200b}b", "a b", "caf\u{e9}", "a\tb"];
+        for value in bad {
+            for in_recipient in [false, true] {
+                let (mut c, owner, agent) = intents_setup();
+                owner_ctx(&owner, T0);
+                let r = if in_recipient {
+                    Route {
+                        dest_asset: "usdc".to_string(),
+                        recipient: value.to_string(),
+                    }
+                } else {
+                    Route {
+                        dest_asset: value.to_string(),
+                        recipient: "0xabc".to_string(),
+                    }
+                };
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    c.set_routes(agent, vec![r]);
+                }));
+                assert!(result.is_err(), "accepted {value:?}");
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid deposit account")]
+    fn approve_rejects_the_wnear_contract_as_deposit_account() {
+        let (mut c, _o, agent) = intents_setup();
+        set_ctx(&guardian(), T0);
+        c.approve_intent(agent, 0, wnear(), U128(NEAR), U64(T0 + MIN_NS), hash());
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid deposit account")]
+    fn approve_rejects_another_agent_as_deposit_account() {
+        let (mut c, owner, agent) = intents_setup();
+        owner_ctx(&owner, T0);
+        let other = accounts(5);
+        c.set_policy(other.clone(), U128(NEAR), U128(NEAR), vec![]);
+        set_ctx(&guardian(), T0);
+        c.approve_intent(agent, 0, other, U128(NEAR), U64(T0 + MIN_NS), hash());
+    }
+
+    #[test]
+    #[should_panic(expected = "guardian only")]
+    fn signer_is_not_used_for_approve_auth() {
+        let (mut c, _o, agent) = intents_setup();
+        let mut b = ctx(&agent, T0, 0);
+        b.signer_account_id(guardian());
+        testing_env!(b.build());
+        c.approve_intent(
+            agent.clone(),
+            0,
+            deposit_acct(),
+            U128(NEAR),
+            U64(T0 + MIN_NS),
+            hash(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "owner only")]
+    fn non_owner_cannot_set_routes() {
+        let (mut c, _o, agent) = intents_setup();
+        testing_env!(ctx(&agent, T0, 1).build());
+        c.set_routes(agent.clone(), vec![route()]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Requires attached deposit")]
+    fn set_routes_needs_one_yocto() {
+        let (mut c, owner, agent) = intents_setup();
+        set_ctx(&owner, T0);
+        c.set_routes(agent, vec![route()]);
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown route")]
+    fn approve_rejects_route_id_255() {
+        let (mut c, _o, agent) = intents_setup();
+        set_ctx(&guardian(), T0);
+        c.approve_intent(
+            agent,
+            255,
+            deposit_acct(),
+            U128(NEAR),
+            U64(T0 + MIN_NS),
+            hash(),
+        );
+    }
+
+    #[test]
+    fn expired_approvals_are_hidden_and_removed_on_the_next_approval() {
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + MIN_NS);
+        set_ctx(&guardian(), T0 + 2 * MIN_NS);
+        assert!(c.get_approvals(agent.clone()).is_empty());
+        assert_eq!(c.approvals.get(&agent).unwrap().len(), 1, "still stored");
+        c.approve_intent(
+            agent.clone(),
+            0,
+            deposit_acct(),
+            U128(NEAR),
+            U64(T0 + 10 * MIN_NS),
+            hash(),
+        );
+        assert_eq!(
+            c.approvals.get(&agent).unwrap().len(),
+            1,
+            "expired one removed"
+        );
+    }
+
+    #[test]
+    fn the_events_carry_all_their_fields() {
+        let (mut c, _o, agent) = intents_setup();
+        assert!(get_logs().iter().any(|l| {
+            l.contains("\"event\":\"intents_configured\"")
+                && l.contains(&format!("\"wnear\":\"{}\"", wnear()))
+                && l.contains(&format!("\"guardian\":\"{}\"", guardian()))
+        }));
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        let logs = get_logs();
+        let line = logs
+            .iter()
+            .find(|l| l.contains("\"event\":\"intent_approved\""))
+            .expect("intent_approved");
+        for part in [
+            format!("\"agent\":\"{agent}\""),
+            "\"route_id\":0".to_string(),
+            format!("\"deposit_account\":\"{}\"", deposit_acct()),
+            format!("\"amount\":\"{NEAR}\""),
+            format!("\"expires_ns\":\"{}\"", T0 + 10 * MIN_NS),
+            format!("\"quote_hash\":\"{}\"", hash()),
+        ] {
+            assert!(line.contains(&part), "missing {part}");
+        }
     }
 }

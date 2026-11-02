@@ -1,4 +1,4 @@
-"""Shared network guard (LEAD, 2026-11-01). Every command that names accounts passes them through `check`."""
+"""Shared network guard. Every command that names accounts passes them through `check`."""
 from __future__ import annotations
 
 import os

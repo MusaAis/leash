@@ -208,7 +208,7 @@ def verify_quote_response(req: QuoteRequest, response: object, *, now: datetime.
         if echo.get(key) != body[key]:
             detail = "" if key in ("recipient", "refundTo") else f": sent {body[key]!r}, got {echo.get(key)!r}"
             raise QuoteRejected(f"response changed {key}{detail}")
-    if "deadline" in echo:  # LEAD condition B: an echoed deadline must be the one we asked for
+    if "deadline" in echo:  # an echoed deadline must be the one we asked for
         try:
             same = parse_iso(echo["deadline"]) == parse_iso(body["deadline"])
         except (ValueError, TypeError):
