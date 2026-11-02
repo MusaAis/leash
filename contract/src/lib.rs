@@ -14,6 +14,11 @@ use near_sdk::{
 const DAY_NS: u64 = 86_400_000_000_000;
 const MAX_ALLOWLIST: usize = 20;
 const MAX_MEMO_BYTES: usize = 128;
+const MAX_ROUTES: usize = 10;
+const MAX_PENDING_APPROVALS: usize = 5;
+const MAX_ROUTE_FIELD_BYTES: usize = 128;
+/// An approval may be valid for at most 30 minutes.
+const MAX_APPROVAL_NS: u64 = 30 * 60 * 1_000_000_000;
 /// 0.1 NEAR kept back so the contract never drains below its storage cost.
 const RESERVE_BUFFER: u128 = 10u128.pow(23);
 
@@ -21,6 +26,8 @@ const RESERVE_BUFFER: u128 = 10u128.pow(23);
 #[derive(BorshStorageKey)]
 enum StorageKey {
     Agents,
+    Routes,
+    Approvals,
 }
 
 #[near(serializers = [borsh])]
@@ -31,6 +38,48 @@ pub struct Policy {
     pub window_start_ns: u64,
     pub allowlist: Vec<AccountId>,
     pub paused: bool,
+}
+
+/// A destination the owner has approved for an agent. Ids are indexes.
+#[near(serializers = [borsh, json])]
+#[derive(Clone)]
+pub struct Route {
+    pub dest_asset: String,
+    pub recipient: String,
+}
+
+/// A single-use permission from the guardian for one swap deposit.
+#[near(serializers = [borsh])]
+#[derive(Clone)]
+pub struct Approval {
+    pub route_id: u8,
+    pub deposit_account: AccountId,
+    pub amount: u128,
+    pub expires_ns: u64,
+    /// sha256 of the saved 1Click answer. A guardian assertion, not enforced here.
+    pub quote_hash: String,
+}
+
+#[near(serializers = [json])]
+pub struct ApprovalView {
+    pub route_id: u8,
+    pub deposit_account: AccountId,
+    pub amount: U128,
+    pub expires_ns: U64,
+    pub quote_hash: String,
+}
+
+fn valid_route_field(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_ROUTE_FIELD_BYTES
+        && !value.chars().any(|c| c.is_control())
+}
+
+fn valid_quote_hash(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 #[near(serializers = [json])]
@@ -63,6 +112,10 @@ pub struct Leash {
     agents: LookupMap<AccountId, Policy>,
     allowed_total: u64,
     denied_total: u64,
+    guardian: Option<AccountId>,
+    wnear: Option<AccountId>,
+    routes: LookupMap<AccountId, Vec<Route>>,
+    approvals: LookupMap<AccountId, Vec<Approval>>,
 }
 
 #[near]
@@ -85,6 +138,10 @@ impl Leash {
             agents: LookupMap::new(StorageKey::Agents),
             allowed_total: 0,
             denied_total: 0,
+            guardian: None,
+            wnear: None,
+            routes: LookupMap::new(StorageKey::Routes),
+            approvals: LookupMap::new(StorageKey::Approvals),
         }
     }
 
@@ -132,6 +189,10 @@ impl Leash {
             "per_tx_cap must be <= daily_cap"
         );
         require!(agent != self.owner, "owner cannot be an agent");
+        require!(
+            self.guardian.as_ref() != Some(&agent),
+            "guardian cannot be an agent"
+        );
         let (spent, start, paused) = match self.agents.get(&agent) {
             Some(p) => (p.spent_in_window, p.window_start_ns, p.paused),
             None => (0, 0, false),
@@ -162,6 +223,8 @@ impl Leash {
     pub fn remove_agent(&mut self, agent: AccountId) {
         self.assert_owner_strict();
         self.agents.remove(&agent);
+        self.routes.remove(&agent);
+        self.approvals.remove(&agent);
         emit("agent_removed", json!({"agent": agent}));
     }
 
@@ -201,6 +264,121 @@ impl Leash {
         self.assert_owner_strict();
         self.paused_all = false;
         emit("resumed_all", json!({}));
+    }
+
+    // ---------- owner: intents configuration ----------
+
+    /// Owner only. Requires 1 yoctoNEAR. Sets the wNEAR token account and the
+    /// guardian. The guardian must differ from the owner, the vault and any agent.
+    #[payable]
+    pub fn set_intents_config(&mut self, wnear: AccountId, guardian: AccountId) {
+        self.assert_owner_strict();
+        require!(
+            guardian != self.owner && guardian != env::current_account_id(),
+            "guardian must differ from the owner and the vault"
+        );
+        require!(
+            !self.agents.contains_key(&guardian),
+            "guardian cannot be an agent"
+        );
+        self.wnear = Some(wnear.clone());
+        self.guardian = Some(guardian.clone());
+        emit(
+            "intents_configured",
+            json!({"wnear": wnear, "guardian": guardian}),
+        );
+    }
+
+    /// Owner only. Requires 1 yoctoNEAR. Replaces the agent's routes and
+    /// clears its pending approvals.
+    #[payable]
+    pub fn set_routes(&mut self, agent: AccountId, routes: Vec<Route>) {
+        self.assert_owner_strict();
+        require!(self.agents.contains_key(&agent), "unknown agent");
+        require!(routes.len() <= MAX_ROUTES, "too many routes");
+        require!(
+            routes
+                .iter()
+                .all(|r| valid_route_field(&r.dest_asset) && valid_route_field(&r.recipient)),
+            "invalid route"
+        );
+        let count = routes.len();
+        self.routes.insert(agent.clone(), routes);
+        self.approvals.remove(&agent);
+        emit("routes_set", json!({"agent": agent, "count": count}));
+    }
+
+    // ---------- guardian ----------
+
+    /// Guardian only. Records a single-use approval for one swap deposit.
+    /// Every rejection panics: the guardian is trusted infrastructure and a
+    /// panic leaves no trace and no counters.
+    pub fn approve_intent(
+        &mut self,
+        agent: AccountId,
+        route_id: u8,
+        deposit_account: AccountId,
+        amount: U128,
+        expires_ns: U64,
+        quote_hash: String,
+    ) {
+        let guardian = self
+            .guardian
+            .clone()
+            .unwrap_or_else(|| env::panic_str("intents not configured"));
+        require!(env::predecessor_account_id() == guardian, "guardian only");
+        let per_tx_cap = match self.agents.get(&agent) {
+            Some(p) => p.per_tx_cap,
+            None => env::panic_str("unknown agent"),
+        };
+        let route_count = self.routes.get(&agent).map_or(0, |r| r.len());
+        require!((route_id as usize) < route_count, "unknown route");
+        require!(
+            amount.0 > 0 && amount.0 <= per_tx_cap,
+            "amount must be above 0 and within per_tx_cap"
+        );
+        let now = env::block_timestamp();
+        require!(expires_ns.0 > now, "expires_ns is in the past");
+        require!(
+            expires_ns.0 <= now.saturating_add(MAX_APPROVAL_NS),
+            "expires_ns is more than 30 minutes ahead"
+        );
+        require!(
+            deposit_account != env::current_account_id()
+                && deposit_account != self.owner
+                && deposit_account != guardian
+                && deposit_account != agent,
+            "invalid deposit account"
+        );
+        require!(
+            valid_quote_hash(&quote_hash),
+            "quote_hash must be 64 lowercase hex characters"
+        );
+        let mut pending = self.approvals.get(&agent).cloned().unwrap_or_default();
+        pending.retain(|a| a.expires_ns > now);
+        require!(
+            pending.len() < MAX_PENDING_APPROVALS,
+            "too many pending approvals"
+        );
+        pending.push(Approval {
+            route_id,
+            deposit_account: deposit_account.clone(),
+            amount: amount.0,
+            expires_ns: expires_ns.0,
+            quote_hash: quote_hash.clone(),
+        });
+        self.approvals.insert(agent.clone(), pending);
+        emit(
+            "intent_approved",
+            json!({
+                "agent": agent,
+                "route_id": route_id,
+                "deposit_account": deposit_account,
+                "amount": amount.0.to_string(),
+                "expires_ns": expires_ns.0.to_string(),
+                "quote_hash": quote_hash
+            }),
+        );
     }
 
     // ---------- agent: the only way money leaves ----------
@@ -295,6 +473,38 @@ impl Leash {
 
     pub fn get_owner(&self) -> AccountId {
         self.owner.clone()
+    }
+
+    pub fn get_guardian(&self) -> Option<AccountId> {
+        self.guardian.clone()
+    }
+
+    pub fn get_wnear(&self) -> Option<AccountId> {
+        self.wnear.clone()
+    }
+
+    pub fn get_routes(&self, agent: AccountId) -> Vec<Route> {
+        self.routes.get(&agent).cloned().unwrap_or_default()
+    }
+
+    /// Returns the approvals that have not expired yet.
+    pub fn get_approvals(&self, agent: AccountId) -> Vec<ApprovalView> {
+        let now = env::block_timestamp();
+        self.approvals
+            .get(&agent)
+            .map(|list| {
+                list.iter()
+                    .filter(|a| a.expires_ns > now)
+                    .map(|a| ApprovalView {
+                        route_id: a.route_id,
+                        deposit_account: a.deposit_account.clone(),
+                        amount: U128(a.amount),
+                        expires_ns: U64(a.expires_ns),
+                        quote_hash: a.quote_hash.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn is_paused_all(&self) -> bool {
@@ -832,5 +1042,418 @@ mod tests {
         owner_ctx(&owner, T0);
         let available = c.get_available_balance().0;
         let _ = c.withdraw(U128(available + 1));
+    }
+
+    // ----- intents: configuration, routes, approvals (P4b step 1) -----
+
+    const MIN_NS: u64 = 60_000_000_000;
+
+    fn guardian() -> AccountId {
+        accounts(3)
+    }
+
+    fn wnear() -> AccountId {
+        accounts(4)
+    }
+
+    fn deposit_acct() -> AccountId {
+        accounts(5)
+    }
+
+    fn hash() -> String {
+        "a".repeat(64)
+    }
+
+    fn route() -> Route {
+        Route {
+            dest_asset: "nep245:base:usdc".to_string(),
+            recipient: "0xRecipient".to_string(),
+        }
+    }
+
+    /// setup() plus intents config (guardian = accounts(3), wnear = accounts(4)) and one route.
+    fn intents_setup() -> (Leash, AccountId, AccountId) {
+        let (mut c, owner, agent, _t) = setup();
+        owner_ctx(&owner, T0);
+        c.set_intents_config(wnear(), guardian());
+        c.set_routes(agent.clone(), vec![route()]);
+        (c, owner, agent)
+    }
+
+    fn approve(c: &mut Leash, agent: &AccountId, amount: u128, expires: u64) {
+        set_ctx(&guardian(), T0);
+        c.approve_intent(
+            agent.clone(),
+            0,
+            deposit_acct(),
+            U128(amount),
+            U64(expires),
+            hash(),
+        );
+    }
+
+    #[test]
+    fn new_vault_has_no_intents_state() {
+        let (c, _o, agent, _t) = setup();
+        assert!(c.get_guardian().is_none());
+        assert!(c.get_wnear().is_none());
+        assert!(c.get_routes(agent.clone()).is_empty());
+        assert!(c.get_approvals(agent).is_empty());
+    }
+
+    #[test]
+    fn owner_configures_intents_and_routes() {
+        let (c, _o, agent) = intents_setup();
+        assert_eq!(c.get_guardian(), Some(guardian()));
+        assert_eq!(c.get_wnear(), Some(wnear()));
+        assert_eq!(c.get_routes(agent).len(), 1);
+        let logs = get_logs();
+        assert!(logs.iter().any(|l| l.contains("\"event\":\"routes_set\"")));
+    }
+
+    #[test]
+    #[should_panic(expected = "owner only")]
+    fn guardian_cannot_set_config() {
+        let (mut c, _o, _a) = intents_setup();
+        testing_env!(ctx(&guardian(), T0, 1).build());
+        c.set_intents_config(wnear(), guardian());
+    }
+
+    #[test]
+    #[should_panic(expected = "Requires attached deposit")]
+    fn set_config_needs_one_yocto() {
+        let (mut c, owner, _a, _t) = setup();
+        set_ctx(&owner, T0);
+        c.set_intents_config(wnear(), guardian());
+    }
+
+    #[test]
+    #[should_panic(expected = "guardian must differ")]
+    fn guardian_cannot_be_the_owner() {
+        let (mut c, owner, _a, _t) = setup();
+        owner_ctx(&owner, T0);
+        c.set_intents_config(wnear(), owner.clone());
+    }
+
+    #[test]
+    #[should_panic(expected = "guardian must differ")]
+    fn guardian_cannot_be_the_vault() {
+        let (mut c, owner, _a, _t) = setup();
+        owner_ctx(&owner, T0);
+        c.set_intents_config(wnear(), vault());
+    }
+
+    #[test]
+    #[should_panic(expected = "guardian cannot be an agent")]
+    fn guardian_cannot_be_an_existing_agent() {
+        let (mut c, owner, agent, _t) = setup();
+        owner_ctx(&owner, T0);
+        c.set_intents_config(wnear(), agent);
+    }
+
+    #[test]
+    #[should_panic(expected = "guardian cannot be an agent")]
+    fn a_policy_cannot_be_set_for_the_guardian() {
+        let (mut c, owner, _a) = intents_setup();
+        owner_ctx(&owner, T0);
+        c.set_policy(guardian(), U128(NEAR), U128(NEAR), vec![]);
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown agent")]
+    fn routes_need_a_policy() {
+        let (mut c, owner, _a) = intents_setup();
+        owner_ctx(&owner, T0);
+        c.set_routes(accounts(5), vec![route()]);
+    }
+
+    #[test]
+    #[should_panic(expected = "too many routes")]
+    fn eleven_routes_are_rejected() {
+        let (mut c, owner, agent) = intents_setup();
+        owner_ctx(&owner, T0);
+        c.set_routes(agent, vec![route(); 11]);
+    }
+
+    #[test]
+    fn ten_routes_are_accepted() {
+        let (mut c, owner, agent) = intents_setup();
+        owner_ctx(&owner, T0);
+        c.set_routes(agent.clone(), vec![route(); 10]);
+        assert_eq!(c.get_routes(agent).len(), 10);
+    }
+
+    #[test]
+    fn bad_route_fields_are_rejected() {
+        let long = "x".repeat(129);
+        let bad = [
+            ("", "r"),
+            ("a", ""),
+            (long.as_str(), "r"),
+            ("a", long.as_str()),
+            ("a\nb", "r"),
+            ("a", "r\u{0}"),
+        ];
+        for (dest, rec) in bad {
+            let (mut c, owner, agent) = intents_setup();
+            owner_ctx(&owner, T0);
+            let r = Route {
+                dest_asset: dest.to_string(),
+                recipient: rec.to_string(),
+            };
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                c.set_routes(agent, vec![r]);
+            }));
+            assert!(result.is_err(), "accepted {dest:?} / {rec:?}");
+        }
+    }
+
+    #[test]
+    fn guardian_approves_and_the_event_carries_the_quote_hash() {
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        let list = c.get_approvals(agent);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].amount.0, NEAR);
+        assert_eq!(list[0].deposit_account, deposit_acct());
+        assert_eq!(list[0].quote_hash, hash());
+        assert!(get_logs()
+            .iter()
+            .any(|l| { l.contains("\"event\":\"intent_approved\"") && l.contains(&hash()) }));
+        let (a, d) = c.get_stats();
+        assert_eq!((a.0, d.0), (0, 0), "approving is not a spend");
+    }
+
+    #[test]
+    #[should_panic(expected = "guardian only")]
+    fn agent_cannot_approve() {
+        let (mut c, _o, agent) = intents_setup();
+        set_ctx(&agent, T0);
+        c.approve_intent(
+            agent.clone(),
+            0,
+            deposit_acct(),
+            U128(NEAR),
+            U64(T0 + MIN_NS),
+            hash(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "guardian only")]
+    fn owner_cannot_approve() {
+        let (mut c, owner, agent) = intents_setup();
+        set_ctx(&owner, T0);
+        c.approve_intent(
+            agent,
+            0,
+            deposit_acct(),
+            U128(NEAR),
+            U64(T0 + MIN_NS),
+            hash(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "intents not configured")]
+    fn approve_needs_a_configured_vault() {
+        let (mut c, _o, agent, _t) = setup();
+        set_ctx(&guardian(), T0);
+        c.approve_intent(
+            agent,
+            0,
+            deposit_acct(),
+            U128(NEAR),
+            U64(T0 + MIN_NS),
+            hash(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "no policy for caller")]
+    fn guardian_cannot_spend() {
+        let (mut c, _o, _a) = intents_setup();
+        set_ctx(&guardian(), T0);
+        c.spend(accounts(2), U128(NEAR), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "owner only")]
+    fn guardian_cannot_withdraw() {
+        let (mut c, _o, _a) = intents_setup();
+        testing_env!(ctx(&guardian(), T0, 1).build());
+        let _ = c.withdraw(U128(NEAR));
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown agent")]
+    fn approve_rejects_an_unknown_agent() {
+        let (mut c, _o, _a) = intents_setup();
+        set_ctx(&guardian(), T0);
+        c.approve_intent(
+            accounts(2),
+            0,
+            deposit_acct(),
+            U128(NEAR),
+            U64(T0 + MIN_NS),
+            hash(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown route")]
+    fn approve_rejects_an_unknown_route() {
+        let (mut c, _o, agent) = intents_setup();
+        set_ctx(&guardian(), T0);
+        c.approve_intent(
+            agent,
+            1,
+            deposit_acct(),
+            U128(NEAR),
+            U64(T0 + MIN_NS),
+            hash(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "within per_tx_cap")]
+    fn approve_rejects_zero() {
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, 0, T0 + MIN_NS);
+    }
+
+    #[test]
+    #[should_panic(expected = "within per_tx_cap")]
+    fn approve_rejects_above_the_per_tx_cap() {
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, 2 * NEAR + 1, T0 + MIN_NS);
+    }
+
+    #[test]
+    #[should_panic(expected = "in the past")]
+    fn approve_rejects_an_expiry_in_the_past() {
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0);
+    }
+
+    #[test]
+    #[should_panic(expected = "more than 30 minutes")]
+    fn approve_rejects_an_expiry_too_far_ahead() {
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 30 * MIN_NS + 1);
+    }
+
+    #[test]
+    fn approve_accepts_exactly_30_minutes() {
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 30 * MIN_NS);
+        assert_eq!(c.get_approvals(agent).len(), 1);
+    }
+
+    #[test]
+    fn approve_rejects_protected_deposit_accounts() {
+        let owner = accounts(0);
+        for bad in [vault(), owner, guardian()] {
+            let (mut c, _o, agent) = intents_setup();
+            set_ctx(&guardian(), T0);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                c.approve_intent(
+                    agent.clone(),
+                    0,
+                    bad.clone(),
+                    U128(NEAR),
+                    U64(T0 + MIN_NS),
+                    hash(),
+                );
+            }));
+            assert!(result.is_err(), "accepted {bad}");
+        }
+        let (mut c, _o, agent) = intents_setup();
+        set_ctx(&guardian(), T0);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.approve_intent(
+                agent.clone(),
+                0,
+                agent.clone(),
+                U128(NEAR),
+                U64(T0 + MIN_NS),
+                hash(),
+            );
+        }));
+        assert!(result.is_err(), "accepted the agent as deposit account");
+    }
+
+    #[test]
+    fn approve_rejects_bad_quote_hashes() {
+        let bad = [
+            "a".repeat(63),
+            "a".repeat(65),
+            "A".repeat(64),
+            "g".repeat(64),
+            String::new(),
+            format!("{} ", "a".repeat(63)),
+        ];
+        for h in bad {
+            let (mut c, _o, agent) = intents_setup();
+            set_ctx(&guardian(), T0);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                c.approve_intent(
+                    agent.clone(),
+                    0,
+                    deposit_acct(),
+                    U128(NEAR),
+                    U64(T0 + MIN_NS),
+                    h.clone(),
+                );
+            }));
+            assert!(result.is_err(), "accepted {h:?}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "too many pending approvals")]
+    fn the_sixth_pending_approval_is_rejected() {
+        let (mut c, _o, agent) = intents_setup();
+        for _ in 0..6 {
+            approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        }
+    }
+
+    #[test]
+    fn expired_approvals_are_pruned_and_free_a_slot() {
+        let (mut c, _o, agent) = intents_setup();
+        for _ in 0..5 {
+            approve(&mut c, &agent, NEAR, T0 + MIN_NS);
+        }
+        set_ctx(&guardian(), T0 + 2 * MIN_NS);
+        assert!(c.get_approvals(agent.clone()).is_empty());
+        c.approve_intent(
+            agent.clone(),
+            0,
+            deposit_acct(),
+            U128(NEAR),
+            U64(T0 + 10 * MIN_NS),
+            hash(),
+        );
+        assert_eq!(c.get_approvals(agent).len(), 1);
+    }
+
+    #[test]
+    fn set_routes_clears_pending_approvals() {
+        let (mut c, owner, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        owner_ctx(&owner, T0);
+        c.set_routes(agent.clone(), vec![route()]);
+        assert!(c.get_approvals(agent).is_empty());
+    }
+
+    #[test]
+    fn remove_agent_clears_routes_and_approvals() {
+        let (mut c, owner, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        owner_ctx(&owner, T0);
+        c.remove_agent(agent.clone());
+        assert!(c.get_routes(agent.clone()).is_empty());
+        assert!(c.get_approvals(agent).is_empty());
     }
 }
