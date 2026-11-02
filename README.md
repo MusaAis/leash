@@ -1,10 +1,12 @@
-# LEASH
+<p align="center">
+  <img src="docs/assets/leash-wordmark.svg" alt="LEASH: Give AI money. Keep the leash." width="480">
+</p>
 
-**Give AI money. Keep the leash.**
-
-[![CI](https://github.com/MusaAis/leash/actions/workflows/ci.yml/badge.svg)](https://github.com/MusaAis/leash/actions/workflows/ci.yml)
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Network](https://img.shields.io/badge/network-NEAR%20testnet-informational)
+<p align="center">
+  <a href="https://github.com/MusaAis/leash/actions/workflows/ci.yml"><img src="https://github.com/MusaAis/leash/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
+  <img src="https://img.shields.io/badge/network-NEAR%20testnet-informational" alt="Network">
+</p>
 
 LEASH is an on-chain spending-control layer for AI agents on NEAR. The funds sit in a vault contract, and an agent can only ask the vault to pay. The vault enforces the owner's limits on-chain, so an agent that is tricked, buggy or hijacked cannot move money outside its policy. Built for NEAR HACKATHON.
 
