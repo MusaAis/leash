@@ -43,6 +43,24 @@ def load_env_file(path: Path) -> None:
 
 
 ACCOUNT_SUFFIX = {"mainnet": "near", "testnet": "testnet"}
+WNEAR = {"mainnet": "wrap.near", "testnet": "wrap.testnet"}
+# `spend_intent` runs a four-action batch, so it has its own gas setting. The contract panics below the minimum.
+INTENT_GAS_MIN_TGAS = 120
+INTENT_GAS_MAX_TGAS = 300
+INTENT_GAS_DEFAULT_TGAS = 150
+
+
+def intent_gas_tgas(raw: str | None) -> int:
+    """Read LEASH_INTENT_GAS_TGAS: whole Tgas between the minimum and the maximum, default 150."""
+    if raw is None or raw.strip() == "":
+        return INTENT_GAS_DEFAULT_TGAS
+    text = raw.strip()
+    if not (text.isascii() and text.isdigit()):
+        raise EnvFileError(f"LEASH_INTENT_GAS_TGAS must be a whole number from {INTENT_GAS_MIN_TGAS} to {INTENT_GAS_MAX_TGAS}")
+    value = int(text)
+    if not INTENT_GAS_MIN_TGAS <= value <= INTENT_GAS_MAX_TGAS:
+        raise EnvFileError(f"LEASH_INTENT_GAS_TGAS must be from {INTENT_GAS_MIN_TGAS} to {INTENT_GAS_MAX_TGAS}")
+    return value
 
 
 @dataclass(frozen=True)
@@ -57,7 +75,14 @@ class Config:
     ai_base_url: str
     ai_model: str
     ai_api_key: str | None
-    gas: str = "30 Tgas"
+    gas: str = "30 Tgas"  # for `spend` only; `spend_intent` uses `intent_gas`
+    guardian: str = ""
+    wnear: str = ""
+    intent_gas_tgas: int = INTENT_GAS_DEFAULT_TGAS
+
+    @property
+    def intent_gas(self) -> str:
+        return f"{self.intent_gas_tgas} Tgas"
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -77,4 +102,7 @@ class Config:
             ai_base_url=os.environ.get("NEAR_AI_BASE_URL", "https://cloud-api.near.ai/v1"),
             ai_model=os.environ.get("NEAR_AI_MODEL", "zai-org/GLM-5.1-FP8"),
             ai_api_key=os.environ.get("NEAR_AI_API_KEY") or None,
+            guardian=f"{prefix}-guardian.{suffix}",
+            wnear=os.environ.get("LEASH_WNEAR") or WNEAR.get(network, ""),
+            intent_gas_tgas=intent_gas_tgas(os.environ.get("LEASH_INTENT_GAS_TGAS")),
         )

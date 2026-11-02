@@ -1,6 +1,6 @@
 SAMPLES ?= 1
 AMOUNT ?= 0.5
-.PHONY: test build fmt lint check check-docs test-agent agent-models agent-dry accounts-testnet deploy-testnet demo-testnet lock-vault-testnet policy-testnet agent-check agent-run attack-testnet attack-llm-testnet intents-tokens intents-dry intents-wet-probe wrap-storage agent-signature guard
+.PHONY: test build fmt lint check check-docs test-agent agent-models agent-dry accounts-testnet deploy-testnet demo-testnet lock-vault-testnet policy-testnet agent-check agent-run attack-testnet attack-llm-testnet intents-tokens intents-dry intents-wet-probe wrap-storage agent-signature guard intents-status intents-config intents-routes intents-approve intents-spend
 
 test:
 	cd contract && cargo test
@@ -69,6 +69,23 @@ wrap-storage:
 
 intents-wet-probe:
 	cd agent && python3 -m leash_agent intents-wet-probe $(if $(PROBE_AMOUNT),--amount $(PROBE_AMOUNT)) --yes
+
+# The call path. Send with YES=1; without it only the plan is printed. Spend and approve need SWAP_AMOUNT and DEPOSIT.
+ROUTE ?= 0
+intents-status:
+	cd agent && python3 -m leash_agent intents-status
+
+intents-config:
+	cd agent && python3 -m leash_agent intents-config $(if $(YES),--yes)
+
+intents-routes:
+	cd agent && python3 -m leash_agent intents-routes $(if $(YES),--yes)
+
+intents-approve:
+	cd agent && python3 -m leash_agent intents-approve --route $(ROUTE) --deposit-account $(DEPOSIT) --amount $(SWAP_AMOUNT) $(if $(MINUTES),--minutes $(MINUTES)) $(if $(QUOTE_HASH),--quote-hash $(QUOTE_HASH)) $(if $(YES),--yes)
+
+intents-spend:
+	cd agent && python3 -m leash_agent intents-spend --route $(ROUTE) --deposit-account $(DEPOSIT) --amount $(SWAP_AMOUNT) $(if $(YES),--yes)
 
 NETWORK ?= testnet
 guard:

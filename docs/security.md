@@ -18,7 +18,7 @@ Funds held by the vault contract, the integrity of each agent policy, and the ac
 
 The agent account holds only gas money; funds stay in the vault. Model output is validated before it is sent, and the vault enforces the policy again, so a fully manipulated model cannot move funds outside the policy. The answer must be exactly one JSON object with known keys, the model's reasoning text is never used, and a cut-off reply is never parsed (see [agent runtime](agent.md)). Outside text is escaped before it is put in the model's untrusted block, long input is refused, the API key is only sent to the NEAR AI Cloud host and redirects are refused, and model use is capped per run and per UTC day.
 
-## Known limitations
+## Scope and limits
 
 - The daily window is fixed. Across a window boundary, up to twice the daily cap can be spent in a short time. Fund agents accordingly.
 - Spend is counted before the transfer settles. A failed transfer still consumes cap (fails closed). Verified on testnet: a payment to an allowlisted account that does not exist emitted `spend_allowed`, the vault balance was restored by the refund, and the daily cap stayed consumed (see [testnet proof](testnet-proof.md)).

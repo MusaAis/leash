@@ -61,6 +61,23 @@ make wrap-storage             # read-only: wrap.near storage bounds and the stor
 
 The probe never deposits. Never send funds to the address it prints. The storage check sends no transaction and holds no key; it reads `LEASH_RPC_URL` (default: a public node from the NEAR docs list). Read on 2026-11-01: the storage deposit of `wrap.near` is 0.00125 NEAR (minimum and maximum are the same). The storage balance of both deposit addresses above was `null` (not registered), so a fresh deposit address is not registered there. The planned payment batch registers it first (design, untested).
 
+## Call path through the vault (written and unit-tested; not yet run on a chain)
+
+Each command builds one `near` call, checks the network guard first (mainnet needs `LEASH_ALLOW_MAINNET=1` in the process environment), prints the plan, and sends only with `YES=1`. Private values are scrubbed from every printed line.
+
+```
+make intents-config   YES=1                      # owner: set the wNEAR contract and the guardian (1 yocto; revokes approvals)
+make intents-routes   YES=1                      # owner: set route 0 from LEASH_ROUTE_DEST_ASSET and LEASH_ROUTE_RECIPIENT
+make intents-approve  DEPOSIT=<account> SWAP_AMOUNT=0.1 YES=1   # guardian key: one single-use approval, 20 minutes by default (1 to 29)
+make intents-spend    DEPOSIT=<account> SWAP_AMOUNT=0.1 YES=1   # agent key: spend_intent
+make intents-status                              # read-only: approvals, stats, policy counters, vault balance
+```
+
+- `spend_intent` has its own gas setting, `LEASH_INTENT_GAS_TGAS`: default 150, refused below 120 or above 300. The 30 Tgas default stays for `spend`. The gas is printed before every call. The contract panics early below 120.
+- At the minimum gas price 1 Tgas costs 0.0001 NEAR (source: docs.near.org/protocol/gas, read 2026-11-02), so 150 Tgas reserves about 0.015 NEAR on the signer; the unused part is refunded. The real gas used is not measured yet.
+- Outside testnet, `intents-approve` needs `QUOTE_HASH` from the guardian's saved quote. On testnet, where 1Click has no testnet, a fixed rehearsal hash is used.
+- The gas numbers in the contract are placeholders until the rehearsal measures them.
+
 ## Not done in this release
 
 - No deposit and no real swap. 1Click gave no minimum in dry quotes down to 0.001 NEAR; a minimum may still apply at deposit time, which is untested.
