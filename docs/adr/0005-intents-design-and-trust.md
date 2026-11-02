@@ -1,6 +1,6 @@
 # ADR 0005: Intents design and trust
 
-**Status.** In progress. Built and unit-tested on branch `feat/p4b-contract`: routes, guardian, `approve_intent`. Not built: `spend_intent`, `unwrap`. Nothing is deployed on mainnet.
+**Status.** In progress. Built and unit-tested on branch `feat/p4b-contract`: routes, guardian, `approve_intent`, `spend_intent`, `unwrap`. Not run on any network. Nothing is deployed on mainnet.
 
 **Context.** The vault holds native NEAR. NEAR Intents (1Click) swaps need a deposit of wNEAR to an address that 1Click returns per quote. The vault must not hand that choice to the agent.
 
@@ -12,3 +12,9 @@
 - Moving funds to a wrong deposit address needs a compromised guardian and a compromised agent at the same time, inside the caps and a 30-minute window.
 - Contract 0.2.0 changes the state layout. It is deployed fresh. There is no `migrate`.
 - The storage deposit of `wrap.near` (0.00125 NEAR, minimum equals maximum) was read once on 2026-11-01 and is not re-checked by the contract.
+- `spend_intent` checks run in this order: intents not configured, all paused, agent paused, zero amount, unknown route, over per-transaction cap, no matching approval (same route, deposit account and exact amount, unexpired, current epoch), over daily cap, insufficient funds. A caller without a policy is reverted before any check. The checks live in one function that takes all state as arguments.
+- The daily cap counts the amount when the batch is scheduled and is never rolled back. The batch goes to wNEAR as one receipt (`storage_deposit` for the vault, `storage_deposit` for the deposit account, `near_deposit`, `ft_transfer`), so its actions succeed or fail together. If wNEAR changes its storage bounds the batch fails and the cap stays consumed. The two storage deposits are not counted in the daily cap.
+- The funds check requires the available balance to cover the amount plus two storage deposits. The same constant is attached to both `storage_deposit` calls.
+- `spend_intent` panics before counting anything when less than 120 TGas is attached; each batch action gets 10 TGas. These gas numbers are placeholders, to be measured in a rehearsal.
+- `unwrap` (owner, 1 yoctoNEAR) calls `near_withdraw` on wNEAR with 1 yoctoNEAR and needs 30 TGas attached. It touches no cap and works while the vault or an agent is paused. The vault does not wait for the result: a failed `near_withdraw` leaves the `unwrapped` event on the chain.
+- `wrap.near` source (the public NEAR core contracts, `near_deposit` and `near_withdraw`) was read once on 2026-11-02. Whether the deployed contract matches that source was not checked on the chain.

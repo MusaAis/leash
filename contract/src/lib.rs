@@ -7,8 +7,8 @@ use near_sdk::json_types::{U128, U64};
 use near_sdk::serde_json::{json, Value};
 use near_sdk::store::LookupMap;
 use near_sdk::{
-    assert_one_yocto, env, near, require, AccountId, BorshStorageKey, NearToken, PanicOnDefault,
-    Promise,
+    assert_one_yocto, env, near, require, AccountId, BorshStorageKey, Gas, NearToken,
+    PanicOnDefault, Promise,
 };
 
 const DAY_NS: u64 = 86_400_000_000_000;
@@ -21,6 +21,18 @@ const MAX_ROUTE_FIELD_BYTES: usize = 128;
 const MAX_APPROVAL_NS: u64 = 30 * 60 * 1_000_000_000;
 /// 0.1 NEAR kept back so the contract never drains below its storage cost.
 const RESERVE_BUFFER: u128 = 10u128.pow(23);
+/// wNEAR storage registration (min = max), read from `storage_balance_bounds` once.
+/// If the token changes its bounds the swap batch fails closed. 0.00125 NEAR.
+const STORAGE_DEPOSIT: u128 = 1_250_000_000_000_000_000_000;
+/// Gas numbers below are placeholders, to be measured in the rehearsal.
+/// `spend_intent` panics early when less than this is attached (to be measured).
+const MIN_INTENT_GAS_TGAS: u64 = 120;
+/// Gas given to each of the four batch actions (to be measured).
+const ACTION_GAS_TGAS: u64 = 10;
+/// `unwrap` panics early when less than this is attached (to be measured).
+const MIN_UNWRAP_GAS_TGAS: u64 = 30;
+/// Gas given to `near_withdraw` (to be measured).
+const UNWRAP_ACTION_GAS_TGAS: u64 = 20;
 
 #[near(serializers = [borsh])]
 #[derive(BorshStorageKey)]
@@ -83,6 +95,76 @@ fn valid_quote_hash(value: &str) -> bool {
         && value
             .bytes()
             .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// All inputs of the `spend_intent` checks. Plain values, no environment reads,
+/// so a view can run the same function later.
+struct IntentCheck<'a> {
+    configured: bool,
+    all_paused: bool,
+    agent_paused: bool,
+    per_tx_cap: u128,
+    daily_cap: u128,
+    window_start_ns: u64,
+    spent_in_window: u128,
+    route_count: usize,
+    approvals: &'a [Approval],
+    epoch: u32,
+    now: u64,
+    /// Balance available to the vault (already net of storage and the reserve buffer).
+    available: u128,
+}
+
+/// Runs the checks in the decided order. `Ok` carries the index of the approval
+/// to consume (first match in list order); `Err` carries the denial reason.
+fn check_intent(
+    s: &IntentCheck,
+    route_id: u8,
+    deposit_account: &AccountId,
+    amount: u128,
+) -> Result<usize, &'static str> {
+    if !s.configured {
+        return Err("intents_not_configured");
+    }
+    if s.all_paused {
+        return Err("all_paused");
+    }
+    if s.agent_paused {
+        return Err("agent_paused");
+    }
+    if amount == 0 {
+        return Err("zero_amount");
+    }
+    if (route_id as usize) >= s.route_count {
+        return Err("unknown_route");
+    }
+    if amount > s.per_tx_cap {
+        return Err("over_per_tx_cap");
+    }
+    let index = s
+        .approvals
+        .iter()
+        .position(|a| {
+            a.route_id == route_id
+                && &a.deposit_account == deposit_account
+                && a.amount == amount
+                && a.expires_ns > s.now
+                && a.epoch == s.epoch
+        })
+        .ok_or("no_approval")?;
+    let spent = if s.now.saturating_sub(s.window_start_ns) >= DAY_NS {
+        0
+    } else {
+        s.spent_in_window
+    };
+    match spent.checked_add(amount) {
+        Some(total) if total <= s.daily_cap => {}
+        _ => return Err("over_daily_cap"),
+    }
+    match amount.checked_add(2 * STORAGE_DEPOSIT) {
+        Some(need) if need <= s.available => Ok(index),
+        _ => Err("insufficient_funds"),
+    }
 }
 
 #[near(serializers = [json])]
@@ -480,6 +562,163 @@ impl Leash {
         }
     }
 
+    /// Agent only. Sends `amount` of NEAR to a swap deposit address through
+    /// wNEAR, if the guardian approved exactly this route, deposit account and
+    /// amount. Returns `true` if the batch was scheduled, `false` if denied.
+    /// The daily cap is counted before sending and is not rolled back.
+    /// Panics early (nothing counted) if too little gas is attached.
+    pub fn spend_intent(&mut self, route_id: u8, deposit_account: AccountId, amount: U128) -> bool {
+        require!(
+            env::prepaid_gas() >= Gas::from_tgas(MIN_INTENT_GAS_TGAS),
+            "not enough gas attached for the swap batch"
+        );
+        let agent = env::predecessor_account_id();
+        if !self.agents.contains_key(&agent) {
+            env::panic_str("no policy for caller");
+        }
+        let amount = amount.0;
+        let now = env::block_timestamp();
+        let available = self.available_balance_yocto();
+        let approvals = self.approvals.get(&agent).cloned().unwrap_or_default();
+        let route_count = self.routes.get(&agent).map_or(0, |r| r.len());
+        let verdict = {
+            let p = self
+                .agents
+                .get(&agent)
+                .unwrap_or_else(|| env::panic_str("no policy for caller"));
+            check_intent(
+                &IntentCheck {
+                    configured: self.guardian.is_some() && self.wnear.is_some(),
+                    all_paused: self.paused_all,
+                    agent_paused: p.paused,
+                    per_tx_cap: p.per_tx_cap,
+                    daily_cap: p.daily_cap,
+                    window_start_ns: p.window_start_ns,
+                    spent_in_window: p.spent_in_window,
+                    route_count,
+                    approvals: &approvals,
+                    epoch: self.intents_epoch,
+                    now,
+                    available,
+                },
+                route_id,
+                &deposit_account,
+                amount,
+            )
+        };
+        let index = match verdict {
+            Err(reason) => {
+                self.denied_total += 1;
+                emit(
+                    "intent_denied",
+                    json!({
+                        "agent": agent,
+                        "route_id": route_id,
+                        "deposit_account": deposit_account,
+                        "amount": amount.to_string(),
+                        "reason": reason
+                    }),
+                );
+                return false;
+            }
+            Ok(index) => index,
+        };
+        let wnear = self
+            .wnear
+            .clone()
+            .unwrap_or_else(|| env::panic_str("intents not configured"));
+        let mut approvals = approvals;
+        let consumed = approvals.remove(index);
+        if approvals.is_empty() {
+            self.approvals.remove(&agent);
+        } else {
+            self.approvals.insert(agent.clone(), approvals);
+        }
+        match self.agents.get_mut(&agent) {
+            None => env::panic_str("no policy for caller"),
+            Some(p) => {
+                if now.saturating_sub(p.window_start_ns) >= DAY_NS {
+                    p.window_start_ns = now;
+                    p.spent_in_window = 0;
+                }
+                p.spent_in_window = p.spent_in_window.saturating_add(amount);
+            }
+        }
+        self.allowed_total += 1;
+        emit(
+            "intent_sent",
+            json!({
+                "agent": agent,
+                "route_id": route_id,
+                "deposit_account": deposit_account,
+                "amount": amount.to_string(),
+                "quote_hash": consumed.quote_hash
+            }),
+        );
+        let action_gas = Gas::from_tgas(ACTION_GAS_TGAS);
+        let storage = NearToken::from_yoctonear(STORAGE_DEPOSIT);
+        // One receipt to wNEAR: the four actions succeed or fail together.
+        Promise::new(wnear)
+            .function_call(
+                "storage_deposit",
+                json!({"account_id": env::current_account_id(), "registration_only": true})
+                    .to_string()
+                    .into_bytes(),
+                storage,
+                action_gas,
+            )
+            .function_call(
+                "storage_deposit",
+                json!({"account_id": deposit_account, "registration_only": true})
+                    .to_string()
+                    .into_bytes(),
+                storage,
+                action_gas,
+            )
+            .function_call(
+                "near_deposit",
+                b"{}".to_vec(),
+                NearToken::from_yoctonear(amount),
+                action_gas,
+            )
+            .function_call(
+                "ft_transfer",
+                json!({"receiver_id": deposit_account, "amount": amount.to_string()})
+                    .to_string()
+                    .into_bytes(),
+                NearToken::from_yoctonear(1),
+                action_gas,
+            )
+            .detach();
+        true
+    }
+
+    /// Owner only. Requires 1 yoctoNEAR. Turns `amount` wNEAR back into NEAR in
+    /// this vault. Touches no cap and works while the vault or an agent is
+    /// paused. No balance check: wNEAR fails the call if the amount is too high.
+    #[payable]
+    pub fn unwrap(&mut self, amount: U128) -> Promise {
+        self.assert_owner_strict();
+        require!(amount.0 > 0, "amount must be above 0");
+        let wnear = self
+            .wnear
+            .clone()
+            .unwrap_or_else(|| env::panic_str("intents not configured"));
+        require!(
+            env::prepaid_gas() >= Gas::from_tgas(MIN_UNWRAP_GAS_TGAS),
+            "not enough gas attached for unwrap"
+        );
+        emit("unwrapped", json!({"amount": amount.0.to_string()}));
+        Promise::new(wnear).function_call(
+            "near_withdraw",
+            json!({"amount": amount.0.to_string()})
+                .to_string()
+                .into_bytes(),
+            NearToken::from_yoctonear(1),
+            Gas::from_tgas(UNWRAP_ACTION_GAS_TGAS),
+        )
+    }
+
     // ---------- views ----------
 
     pub fn get_owner(&self) -> AccountId {
@@ -574,7 +813,8 @@ impl Leash {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use near_sdk::test_utils::{accounts, get_logs, VMContextBuilder};
+    use near_sdk::mock::MockAction;
+    use near_sdk::test_utils::{accounts, get_created_receipts, get_logs, VMContextBuilder};
     use near_sdk::testing_env;
 
     const NEAR: u128 = 10u128.pow(24);
@@ -1645,5 +1885,525 @@ mod tests {
         ] {
             assert!(line.contains(&part), "missing {part}");
         }
+    }
+
+    // ----- spend_intent and unwrap -----
+
+    fn gas_ctx(caller: &AccountId, ts: u64, deposit: u128, tgas: u64) {
+        testing_env!(ctx(caller, ts, deposit)
+            .prepaid_gas(Gas::from_tgas(tgas))
+            .build());
+    }
+
+    fn intent(c: &mut Leash, agent: &AccountId, amount: u128, ts: u64) -> bool {
+        gas_ctx(agent, ts, 0, 200);
+        c.spend_intent(0, deposit_acct(), U128(amount))
+    }
+
+    fn intent_denied_with(reason: &str) -> bool {
+        get_logs().iter().any(|l| {
+            l.contains("\"event\":\"intent_denied\"")
+                && l.contains(&format!("\"reason\":\"{reason}\""))
+        })
+    }
+
+    fn approve_h(c: &mut Leash, agent: &AccountId, amount: u128, expires: u64, h: &str) {
+        set_ctx(&guardian(), T0);
+        c.approve_intent(
+            agent.clone(),
+            0,
+            deposit_acct(),
+            U128(amount),
+            U64(expires),
+            h.to_string(),
+        );
+    }
+
+    fn batch_calls() -> (AccountId, Vec<(String, Value, u128, u64)>) {
+        let receipts = get_created_receipts();
+        assert_eq!(receipts.len(), 1, "exactly one receipt");
+        let calls = receipts[0]
+            .actions
+            .iter()
+            .filter_map(|a| match a {
+                MockAction::FunctionCallWeight {
+                    method_name,
+                    args,
+                    attached_deposit,
+                    prepaid_gas,
+                    ..
+                } => Some((
+                    String::from_utf8(method_name.clone()).unwrap(),
+                    near_sdk::serde_json::from_slice::<Value>(args).unwrap(),
+                    attached_deposit.as_yoctonear(),
+                    prepaid_gas.as_tgas(),
+                )),
+                _ => None,
+            })
+            .collect();
+        (receipts[0].receiver_id.clone(), calls)
+    }
+
+    fn appr(amount: u128, expires: u64, epoch: u32, h: &str) -> Approval {
+        Approval {
+            route_id: 0,
+            deposit_account: deposit_acct(),
+            amount,
+            expires_ns: expires,
+            epoch,
+            quote_hash: h.to_string(),
+        }
+    }
+
+    fn base(a: &[Approval]) -> IntentCheck<'_> {
+        IntentCheck {
+            configured: true,
+            all_paused: false,
+            agent_paused: false,
+            per_tx_cap: 2 * NEAR,
+            daily_cap: 5 * NEAR,
+            window_start_ns: T0,
+            spent_in_window: 0,
+            route_count: 1,
+            approvals: a,
+            epoch: 1,
+            now: T0,
+            available: 100 * NEAR,
+        }
+    }
+
+    #[test]
+    fn check_order_follows_the_decided_sequence() {
+        let none: Vec<Approval> = vec![];
+        let d = deposit_acct();
+        let mut s = base(&none);
+        s.configured = false;
+        s.all_paused = true;
+        s.agent_paused = true;
+        s.available = 0;
+        s.spent_in_window = 5 * NEAR;
+        assert_eq!(check_intent(&s, 9, &d, 0), Err("intents_not_configured"));
+        s.configured = true;
+        assert_eq!(check_intent(&s, 9, &d, 0), Err("all_paused"));
+        s.all_paused = false;
+        assert_eq!(check_intent(&s, 9, &d, 0), Err("agent_paused"));
+        s.agent_paused = false;
+        assert_eq!(check_intent(&s, 9, &d, 0), Err("zero_amount"));
+        assert_eq!(check_intent(&s, 9, &d, 3 * NEAR), Err("unknown_route"));
+        assert_eq!(check_intent(&s, 0, &d, 3 * NEAR), Err("over_per_tx_cap"));
+        assert_eq!(check_intent(&s, 0, &d, NEAR), Err("no_approval"));
+        let one = vec![appr(NEAR, T0 + MIN_NS, 1, &hash())];
+        let mut s2 = base(&one);
+        s2.available = 0;
+        s2.spent_in_window = 5 * NEAR;
+        assert_eq!(check_intent(&s2, 0, &d, NEAR), Err("over_daily_cap"));
+        s2.spent_in_window = 0;
+        assert_eq!(check_intent(&s2, 0, &d, NEAR), Err("insufficient_funds"));
+        s2.available = NEAR + 2 * STORAGE_DEPOSIT;
+        assert_eq!(check_intent(&s2, 0, &d, NEAR), Ok(0));
+        s2.available -= 1;
+        assert_eq!(check_intent(&s2, 0, &d, NEAR), Err("insufficient_funds"));
+    }
+
+    #[test]
+    fn check_matching_rules() {
+        let d = deposit_acct();
+        let other: AccountId = "other.testnet".parse().unwrap();
+        let list = vec![appr(NEAR, T0 + MIN_NS, 1, &hash())];
+        let s = base(&list);
+        assert_eq!(check_intent(&s, 0, &d, NEAR), Ok(0));
+        assert_eq!(check_intent(&s, 0, &d, NEAR + 1), Err("no_approval"));
+        assert_eq!(check_intent(&s, 0, &other, NEAR), Err("no_approval"));
+        let mut old_epoch = base(&list);
+        old_epoch.epoch = 2;
+        assert_eq!(check_intent(&old_epoch, 0, &d, NEAR), Err("no_approval"));
+        let mut at_expiry = base(&list);
+        at_expiry.now = T0 + MIN_NS;
+        assert_eq!(check_intent(&at_expiry, 0, &d, NEAR), Err("no_approval"));
+        let twins = vec![
+            appr(NEAR, T0 + MIN_NS, 1, &"1".repeat(64)),
+            appr(NEAR, T0 + 5 * MIN_NS, 1, &"2".repeat(64)),
+        ];
+        assert_eq!(check_intent(&base(&twins), 0, &d, NEAR), Ok(0));
+        let mut later = base(&twins);
+        later.now = T0 + 2 * MIN_NS;
+        assert_eq!(check_intent(&later, 0, &d, NEAR), Ok(1));
+        let mut stale_window = base(&list);
+        stale_window.spent_in_window = 5 * NEAR;
+        stale_window.now = T0 + MIN_NS - 1;
+        assert_eq!(
+            check_intent(&stale_window, 0, &d, NEAR),
+            Err("over_daily_cap")
+        );
+        let mut new_window = base(&list);
+        new_window.spent_in_window = 5 * NEAR;
+        new_window.window_start_ns = 0;
+        assert_eq!(check_intent(&new_window, 0, &d, NEAR), Ok(0));
+    }
+
+    #[test]
+    #[should_panic(expected = "guardian only")]
+    fn agent_cannot_approve_intent() {
+        let (mut c, _o, agent) = intents_setup();
+        set_ctx(&agent, T0);
+        c.approve_intent(
+            agent.clone(),
+            0,
+            deposit_acct(),
+            U128(NEAR),
+            U64(T0 + MIN_NS),
+            hash(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "no policy for caller")]
+    fn guardian_cannot_spend_intent() {
+        let (mut c, _o, _a) = intents_setup();
+        gas_ctx(&guardian(), T0, 0, 200);
+        c.spend_intent(0, deposit_acct(), U128(NEAR));
+    }
+
+    #[test]
+    #[should_panic(expected = "no policy for caller")]
+    fn guardian_cannot_call_spend() {
+        let (mut c, _o, _a) = intents_setup();
+        set_ctx(&guardian(), T0);
+        c.spend(accounts(2), U128(NEAR), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "owner only")]
+    fn guardian_cannot_unwrap() {
+        let (mut c, _o, _a) = intents_setup();
+        gas_ctx(&guardian(), T0, 1, 100);
+        let _ = c.unwrap(U128(NEAR));
+    }
+
+    #[test]
+    fn caller_without_policy_reverts_and_leaves_no_trace() {
+        let (mut c, _o, _a) = intents_setup();
+        gas_ctx(&accounts(2), T0, 0, 200);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.spend_intent(0, deposit_acct(), U128(NEAR))
+        }));
+        assert!(r.is_err());
+        assert_eq!(c.get_stats(), (U64(0), U64(0)));
+        assert!(get_logs().is_empty());
+    }
+
+    #[test]
+    fn denied_without_config_counts_and_emits() {
+        let (mut c, _o, agent, _t) = setup();
+        assert!(!intent(&mut c, &agent, NEAR, T0));
+        assert!(intent_denied_with("intents_not_configured"));
+        assert_eq!(c.get_stats(), (U64(0), U64(1)));
+        let log = get_logs().join("");
+        assert!(
+            log.contains("\"route_id\":0")
+                && log.contains("\"amount\":\"1000000000000000000000000\"")
+        );
+        assert!(log.contains(&format!("\"agent\":\"{agent}\"")));
+    }
+
+    #[test]
+    fn denied_when_paused_or_unknown_route_or_over_cap() {
+        let (mut c, owner, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        owner_ctx(&owner, T0);
+        c.pause_all();
+        assert!(!intent(&mut c, &agent, NEAR, T0));
+        assert!(intent_denied_with("all_paused"));
+        owner_ctx(&owner, T0);
+        c.resume_all();
+        owner_ctx(&owner, T0);
+        c.pause_agent(agent.clone());
+        assert!(!intent(&mut c, &agent, NEAR, T0));
+        assert!(intent_denied_with("agent_paused"));
+        // a denied intent consumes no approval and no cap
+        set_ctx(&agent, T0);
+        assert_eq!(c.get_approvals(agent.clone()).len(), 1);
+        assert_eq!(c.get_policy(agent.clone()).unwrap().spent_in_window.0, 0);
+        owner_ctx(&owner, T0);
+        c.resume_agent(agent.clone());
+        gas_ctx(&agent, T0, 0, 200);
+        assert!(!c.spend_intent(0, deposit_acct(), U128(0)));
+        assert!(intent_denied_with("zero_amount"));
+        gas_ctx(&agent, T0, 0, 200);
+        assert!(!c.spend_intent(1, deposit_acct(), U128(NEAR)));
+        assert!(intent_denied_with("unknown_route"));
+        gas_ctx(&agent, T0, 0, 200);
+        assert!(!c.spend_intent(0, deposit_acct(), U128(3 * NEAR)));
+        assert!(intent_denied_with("over_per_tx_cap"));
+        assert!(intent(&mut c, &agent, NEAR, T0));
+    }
+
+    #[test]
+    fn approval_is_single_use() {
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        assert!(intent(&mut c, &agent, NEAR, T0));
+        assert!(!intent(&mut c, &agent, NEAR, T0));
+        assert!(intent_denied_with("no_approval"));
+        assert_eq!(c.get_stats(), (U64(1), U64(1)));
+    }
+
+    #[test]
+    fn wrong_amount_route_deposit_or_agent_is_denied() {
+        let (mut c, owner, agent) = intents_setup();
+        owner_ctx(&owner, T0);
+        c.set_routes(agent.clone(), vec![route(), route()]);
+        let agent2: AccountId = "agent2.testnet".parse().unwrap();
+        owner_ctx(&owner, T0);
+        c.set_policy(agent2.clone(), U128(2 * NEAR), U128(5 * NEAR), vec![]);
+        owner_ctx(&owner, T0);
+        c.set_routes(agent2.clone(), vec![route()]);
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        assert!(!intent(&mut c, &agent, NEAR + 1, T0));
+        assert!(intent_denied_with("no_approval"));
+        gas_ctx(&agent, T0, 0, 200);
+        let other: AccountId = "other.testnet".parse().unwrap();
+        assert!(!c.spend_intent(0, other, U128(NEAR)));
+        assert!(intent_denied_with("no_approval"));
+        gas_ctx(&agent, T0, 0, 200);
+        assert!(!c.spend_intent(1, deposit_acct(), U128(NEAR)));
+        assert!(intent_denied_with("no_approval"));
+        assert!(!intent(&mut c, &agent2, NEAR, T0));
+        assert!(intent_denied_with("no_approval"));
+        // the right call still works: nothing above consumed the approval
+        assert!(intent(&mut c, &agent, NEAR, T0));
+    }
+
+    #[test]
+    fn expired_approval_is_never_consumed() {
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + MIN_NS);
+        assert!(!intent(&mut c, &agent, NEAR, T0 + MIN_NS));
+        assert!(!intent(&mut c, &agent, NEAR, T0 + 2 * MIN_NS));
+        assert!(intent_denied_with("no_approval"));
+        // an expired twin is skipped; the live one is used
+        approve_h(&mut c, &agent, NEAR, T0 + MIN_NS, &"1".repeat(64));
+        approve_h(&mut c, &agent, NEAR, T0 + 20 * MIN_NS, &"2".repeat(64));
+        assert!(intent(&mut c, &agent, NEAR, T0 + 5 * MIN_NS));
+        assert!(get_logs().join("").contains(&"2".repeat(64)));
+        assert!(!intent(&mut c, &agent, NEAR, T0 + 5 * MIN_NS));
+    }
+
+    #[test]
+    fn set_routes_clears_approvals() {
+        let (mut c, owner, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        owner_ctx(&owner, T0);
+        c.set_routes(agent.clone(), vec![route()]);
+        assert!(!intent(&mut c, &agent, NEAR, T0));
+        assert!(intent_denied_with("no_approval"));
+    }
+
+    #[test]
+    fn config_change_revokes_approvals_and_new_ones_work() {
+        let (mut c, owner, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        owner_ctx(&owner, T0);
+        c.set_intents_config(wnear(), guardian());
+        assert!(!intent(&mut c, &agent, NEAR, T0));
+        assert!(intent_denied_with("no_approval"));
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        assert!(intent(&mut c, &agent, NEAR, T0));
+    }
+
+    #[test]
+    fn identical_approvals_are_used_one_per_swap_in_list_order() {
+        let (mut c, _o, agent) = intents_setup();
+        approve_h(&mut c, &agent, NEAR, T0 + 10 * MIN_NS, &"1".repeat(64));
+        approve_h(&mut c, &agent, NEAR, T0 + 10 * MIN_NS, &"2".repeat(64));
+        assert!(intent(&mut c, &agent, NEAR, T0));
+        assert!(get_logs().join("").contains(&"1".repeat(64)));
+        assert!(intent(&mut c, &agent, NEAR, T0));
+        assert!(get_logs().join("").contains(&"2".repeat(64)));
+        assert!(!intent(&mut c, &agent, NEAR, T0));
+        assert!(intent_denied_with("no_approval"));
+    }
+
+    #[test]
+    fn daily_cap_is_shared_between_spend_and_spend_intent() {
+        let (mut c, _o, agent) = intents_setup();
+        set_ctx(&agent, T0);
+        assert!(c.spend(accounts(2), U128(2 * NEAR), None));
+        assert!(c.spend(accounts(2), U128(2 * NEAR), None));
+        approve(&mut c, &agent, 2 * NEAR, T0 + 10 * MIN_NS);
+        assert!(!intent(&mut c, &agent, 2 * NEAR, T0));
+        assert!(intent_denied_with("over_daily_cap"));
+        // the other direction, in a fresh vault
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, 2 * NEAR, T0 + 10 * MIN_NS);
+        approve(&mut c, &agent, 2 * NEAR, T0 + 10 * MIN_NS);
+        assert!(intent(&mut c, &agent, 2 * NEAR, T0));
+        assert!(intent(&mut c, &agent, 2 * NEAR, T0));
+        set_ctx(&agent, T0);
+        assert!(!c.spend(accounts(2), U128(2 * NEAR), None));
+        assert!(denied_with("over_daily_cap"));
+    }
+
+    #[test]
+    fn funds_boundary_is_amount_plus_two_storage_deposits() {
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        gas_ctx(&agent, T0, 0, 200);
+        let reserve = 100 * NEAR - c.get_available_balance().0;
+        let need = NEAR + 2 * STORAGE_DEPOSIT;
+        testing_env!(ctx(&agent, T0, 0)
+            .prepaid_gas(Gas::from_tgas(200))
+            .account_balance(NearToken::from_yoctonear(need + reserve - 1))
+            .build());
+        assert!(!c.spend_intent(0, deposit_acct(), U128(NEAR)));
+        assert!(intent_denied_with("insufficient_funds"));
+        assert_eq!(c.get_approvals(agent.clone()).len(), 1);
+        testing_env!(ctx(&agent, T0, 0)
+            .prepaid_gas(Gas::from_tgas(200))
+            .account_balance(NearToken::from_yoctonear(need + reserve))
+            .build());
+        assert!(c.spend_intent(0, deposit_acct(), U128(NEAR)));
+    }
+
+    #[test]
+    fn batch_has_four_actions_in_order_to_wnear() {
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        assert!(intent(&mut c, &agent, NEAR, T0));
+        let (receiver, calls) = batch_calls();
+        assert_eq!(receiver, wnear());
+        assert_eq!(calls.len(), 4);
+        assert_eq!(calls[0].0, "storage_deposit");
+        assert_eq!(
+            calls[0].1,
+            json!({"account_id": vault(), "registration_only": true})
+        );
+        assert_eq!(calls[0].2, STORAGE_DEPOSIT);
+        assert_eq!(calls[1].0, "storage_deposit");
+        assert_eq!(
+            calls[1].1,
+            json!({"account_id": deposit_acct(), "registration_only": true})
+        );
+        assert_eq!(calls[1].2, STORAGE_DEPOSIT);
+        assert_eq!(calls[2].0, "near_deposit");
+        assert_eq!(calls[2].2, NEAR);
+        assert_eq!(calls[3].0, "ft_transfer");
+        assert_eq!(
+            calls[3].1,
+            json!({"receiver_id": deposit_acct(), "amount": NEAR.to_string()})
+        );
+        assert_eq!(calls[3].2, 1);
+        assert!(calls.iter().all(|x| x.3 == ACTION_GAS_TGAS));
+    }
+
+    #[test]
+    fn storage_amounts_do_not_change_the_daily_counter() {
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        assert!(intent(&mut c, &agent, NEAR, T0));
+        assert_eq!(c.get_policy(agent).unwrap().spent_in_window.0, NEAR);
+    }
+
+    #[test]
+    fn allowed_event_carries_the_consumed_quote_hash() {
+        let (mut c, _o, agent) = intents_setup();
+        approve_h(&mut c, &agent, NEAR, T0 + 10 * MIN_NS, &"b".repeat(64));
+        assert!(intent(&mut c, &agent, NEAR, T0));
+        let log = get_logs().join("");
+        assert!(log.contains("\"event\":\"intent_sent\""));
+        assert!(log.contains(&format!("\"quote_hash\":\"{}\"", "b".repeat(64))));
+        assert!(log.contains(&format!("\"deposit_account\":\"{}\"", deposit_acct())));
+    }
+
+    #[test]
+    fn early_gas_panic_counts_nothing_and_120_passes() {
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        gas_ctx(&agent, T0, 0, MIN_INTENT_GAS_TGAS - 1);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.spend_intent(0, deposit_acct(), U128(NEAR))
+        }));
+        assert!(r.is_err());
+        set_ctx(&agent, T0);
+        assert_eq!(c.get_stats(), (U64(0), U64(0)));
+        assert_eq!(c.get_approvals(agent.clone()).len(), 1);
+        assert_eq!(c.get_policy(agent.clone()).unwrap().spent_in_window.0, 0);
+        gas_ctx(&agent, T0, 0, MIN_INTENT_GAS_TGAS);
+        assert!(c.spend_intent(0, deposit_acct(), U128(NEAR)));
+    }
+
+    #[test]
+    fn gas_numbers_fit_the_transaction_limit() {
+        assert!(MIN_INTENT_GAS_TGAS + 100 <= 300);
+        assert!(4 * ACTION_GAS_TGAS <= MIN_INTENT_GAS_TGAS);
+        assert!(UNWRAP_ACTION_GAS_TGAS <= MIN_UNWRAP_GAS_TGAS);
+    }
+
+    #[test]
+    fn unwrap_calls_near_withdraw_with_one_yocto() {
+        let (mut c, owner, _a) = intents_setup();
+        gas_ctx(&owner, T0, 1, MIN_UNWRAP_GAS_TGAS);
+        let _ = c.unwrap(U128(NEAR));
+        let log = get_logs().join("");
+        assert!(log.contains("\"event\":\"unwrapped\""));
+        assert!(log.contains("\"amount\":\"1000000000000000000000000\""));
+        let (receiver, calls) = batch_calls();
+        assert_eq!(receiver, wnear());
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "near_withdraw");
+        assert_eq!(calls[0].1, json!({"amount": NEAR.to_string()}));
+        assert_eq!(calls[0].2, 1);
+    }
+
+    #[test]
+    fn unwrap_works_while_paused() {
+        let (mut c, owner, agent) = intents_setup();
+        owner_ctx(&owner, T0);
+        c.pause_all();
+        owner_ctx(&owner, T0);
+        c.pause_agent(agent);
+        gas_ctx(&owner, T0, 1, MIN_UNWRAP_GAS_TGAS);
+        let _ = c.unwrap(U128(NEAR));
+        assert!(get_logs().join("").contains("\"event\":\"unwrapped\""));
+    }
+
+    #[test]
+    #[should_panic(expected = "owner only")]
+    fn unwrap_needs_owner() {
+        let (mut c, _o, agent) = intents_setup();
+        gas_ctx(&agent, T0, 1, 100);
+        let _ = c.unwrap(U128(NEAR));
+    }
+
+    #[test]
+    #[should_panic(expected = "Requires attached deposit")]
+    fn unwrap_needs_one_yocto() {
+        let (mut c, owner, _a) = intents_setup();
+        gas_ctx(&owner, T0, 0, 100);
+        let _ = c.unwrap(U128(NEAR));
+    }
+
+    #[test]
+    #[should_panic(expected = "amount must be above 0")]
+    fn unwrap_rejects_zero() {
+        let (mut c, owner, _a) = intents_setup();
+        gas_ctx(&owner, T0, 1, 100);
+        let _ = c.unwrap(U128(0));
+    }
+
+    #[test]
+    #[should_panic(expected = "intents not configured")]
+    fn unwrap_needs_wnear_configured() {
+        let (mut c, owner, _a, _t) = setup();
+        gas_ctx(&owner, T0, 1, 100);
+        let _ = c.unwrap(U128(NEAR));
+    }
+
+    #[test]
+    #[should_panic(expected = "not enough gas")]
+    fn unwrap_needs_30_tgas() {
+        let (mut c, owner, _a) = intents_setup();
+        gas_ctx(&owner, T0, 1, MIN_UNWRAP_GAS_TGAS - 1);
+        let _ = c.unwrap(U128(NEAR));
     }
 }

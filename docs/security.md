@@ -28,13 +28,17 @@ The agent account holds only gas money; funds stay in the vault. Model output is
 - The daily model budget is a file read and written by one process at a time; two runs started together can both pass the check. A service with several processes needs a shared counter.
 - Prompt-injection results are evidence about one model and ten attack texts, not a guarantee. The vault policy, not the model, is the security boundary.
 - Only native NEAR is spent by the vault. Token and cross-chain payments are not part of this release.
-- The guardian's quote checks run off the chain and move no funds in this release. See [intents](intents.md).
+- The guardian's quote checks run off the chain. See [intents](intents.md).
+- A compromised guardian can approve intents up to the agent's per-transaction and daily caps. The allowlist does not apply to intents. Routes are records that the guardian enforces, not the contract. Moving funds to a wrong deposit address needs a compromised guardian and a compromised agent at the same time, inside the caps and a 30-minute approval window.
+- `spend_intent` counts the amount in the daily cap before the batch runs and does not roll it back. There is no settle callback: a failed swap deposit does not return the cap.
+- Changing the intents configuration (`set_intents_config`, even with the same values) revokes every pending approval. `set_routes` clears the approvals of that agent only; it does not change the configuration epoch.
+- The agent must attach enough gas for `spend_intent`; below the minimum it panics and nothing is counted. The gas numbers are placeholders until measured in a rehearsal.
 - Routes (asset and recipient) are recorded on the chain for the owner and the guardian to read. The vault never sees a swap's destination, so it cannot check that a quote pays the recorded recipient: that check is the guardian's (planned contract 0.2.0, see [ADR 0005](adr/0005-intents-design-and-trust.md)).
 - Contract 0.2.0 changes the state layout and has no `migrate`: it is deployed fresh, never over an older vault.
 
 ## Exit path
 
-The owner can always call `withdraw`, also while agents or the whole vault are paused. Deleting the full-access keys removes the ability to upgrade the contract; it does not remove the owner's exit.
+The owner can always call `withdraw` and `unwrap`, also while agents or the whole vault are paused. Deleting the full-access keys removes the ability to upgrade the contract; it does not remove the owner's exit.
 
 ## Deployment requirements
 
