@@ -57,6 +57,11 @@ class EnvRoutes:
         return self._route
 
 
+# Two wNEAR storage deposits per swap (0.00125 NEAR each); same value as the contract's INTENT_OVERHEAD.
+STORAGE_DEPOSIT = 1_250_000_000_000_000_000_000
+INTENT_OVERHEAD = 2 * STORAGE_DEPOSIT
+
+
 def intent_denial(snap: Snapshot, amount: int) -> str | None:
     """The reason the vault would deny `spend_intent`, in the contract's order, or None. (Allowlist: not used.)"""
     if snap.all_paused:
@@ -67,9 +72,9 @@ def intent_denial(snap: Snapshot, amount: int) -> str | None:
         return "zero_amount"
     if amount > snap.per_tx_cap:
         return "over_per_tx_cap"
-    if snap.spent + amount > snap.daily_cap:
+    if snap.spent + amount + INTENT_OVERHEAD > snap.daily_cap:
         return "over_daily_cap"
-    if amount > snap.balance:
+    if amount + INTENT_OVERHEAD > snap.balance:  # `balance` is the vault's available balance, already net of reserve
         return "insufficient_funds"
     return None
 

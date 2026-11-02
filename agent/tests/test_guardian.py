@@ -7,7 +7,7 @@ from unittest import mock
 
 from leash_agent import __main__ as cli
 from leash_agent.chain import Snapshot
-from leash_agent.guardian import EnvRoutes, Guardian, GuardianLog, Refused, intent_denial
+from leash_agent.guardian import INTENT_OVERHEAD, EnvRoutes, Guardian, GuardianLog, Refused, intent_denial
 from leash_agent.intents import IntentsError, QuoteRejected, parse_iso
 from tests.test_chain import make_config
 from tests.test_intents import ASSET, DEPOSIT, NOW
@@ -106,6 +106,19 @@ class GuardianTests(unittest.TestCase):
         self.assertEqual(intent_denial(snap(spent=3 * NEAR), NEAR), "over_daily_cap")
         self.assertEqual(intent_denial(snap(balance=0), NEAR), "insufficient_funds")
         self.assertIsNone(intent_denial(snap(), NEAR))
+
+    def test_mirror_counts_the_storage_overhead_in_the_daily_check(self):
+        edge = 3 * NEAR - NEAR - INTENT_OVERHEAD  # spent + amount + overhead == daily cap
+        self.assertIsNone(intent_denial(snap(spent=edge), NEAR))
+        self.assertEqual(intent_denial(snap(spent=edge + 1), NEAR), "over_daily_cap")
+        self.assertEqual(intent_denial(snap(per_tx_cap=3 * NEAR), 3 * NEAR), "over_daily_cap")
+
+    def test_mirror_counts_the_storage_overhead_in_the_funds_check(self):
+        self.assertIsNone(intent_denial(snap(balance=NEAR + INTENT_OVERHEAD), NEAR))
+        self.assertEqual(intent_denial(snap(balance=NEAR + INTENT_OVERHEAD - 1), NEAR), "insufficient_funds")
+
+    def test_mirror_order_puts_the_daily_cap_before_funds(self):
+        self.assertEqual(intent_denial(snap(spent=3 * NEAR, balance=0), NEAR), "over_daily_cap")
 
     def test_each_hostile_response_is_refused_and_logged_without_an_issued_quote(self):
         def set_echo(key, value):

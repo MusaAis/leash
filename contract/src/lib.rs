@@ -24,6 +24,9 @@ const RESERVE_BUFFER: u128 = 10u128.pow(23);
 /// wNEAR storage registration (min = max), read from `storage_balance_bounds` once.
 /// If the token changes its bounds the swap batch fails closed. 0.00125 NEAR.
 const STORAGE_DEPOSIT: u128 = 1_250_000_000_000_000_000_000;
+/// Two storage deposits per swap (the vault and the deposit account). Counted in the
+/// funds check, the daily check and the daily counter, so the daily cap bounds them.
+const INTENT_OVERHEAD: u128 = 2 * STORAGE_DEPOSIT;
 /// Gas numbers below are placeholders, to be measured in the rehearsal.
 /// `spend_intent` panics early when less than this is attached (to be measured).
 const MIN_INTENT_GAS_TGAS: u64 = 120;
@@ -157,11 +160,14 @@ fn check_intent(
     } else {
         s.spent_in_window
     };
-    match spent.checked_add(amount) {
+    match spent
+        .checked_add(amount)
+        .and_then(|t| t.checked_add(INTENT_OVERHEAD))
+    {
         Some(total) if total <= s.daily_cap => {}
         _ => return Err("over_daily_cap"),
     }
-    match amount.checked_add(2 * STORAGE_DEPOSIT) {
+    match amount.checked_add(INTENT_OVERHEAD) {
         Some(need) if need <= s.available => Ok(index),
         _ => Err("insufficient_funds"),
     }
@@ -641,7 +647,10 @@ impl Leash {
                     p.window_start_ns = now;
                     p.spent_in_window = 0;
                 }
-                p.spent_in_window = p.spent_in_window.saturating_add(amount);
+                // The check already proved this sum does not overflow.
+                p.spent_in_window = p
+                    .spent_in_window
+                    .saturating_add(amount.saturating_add(INTENT_OVERHEAD));
             }
         }
         self.allowed_total += 1;
@@ -1999,7 +2008,7 @@ mod tests {
         assert_eq!(check_intent(&s2, 0, &d, NEAR), Err("over_daily_cap"));
         s2.spent_in_window = 0;
         assert_eq!(check_intent(&s2, 0, &d, NEAR), Err("insufficient_funds"));
-        s2.available = NEAR + 2 * STORAGE_DEPOSIT;
+        s2.available = NEAR + INTENT_OVERHEAD;
         assert_eq!(check_intent(&s2, 0, &d, NEAR), Ok(0));
         s2.available -= 1;
         assert_eq!(check_intent(&s2, 0, &d, NEAR), Err("insufficient_funds"));
@@ -2250,7 +2259,7 @@ mod tests {
         approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
         gas_ctx(&agent, T0, 0, 200);
         let reserve = 100 * NEAR - c.get_available_balance().0;
-        let need = NEAR + 2 * STORAGE_DEPOSIT;
+        let need = NEAR + INTENT_OVERHEAD;
         testing_env!(ctx(&agent, T0, 0)
             .prepaid_gas(Gas::from_tgas(200))
             .account_balance(NearToken::from_yoctonear(need + reserve - 1))
@@ -2297,11 +2306,59 @@ mod tests {
     }
 
     #[test]
-    fn storage_amounts_do_not_change_the_daily_counter() {
+    fn storage_amounts_are_counted_in_the_daily_counter() {
         let (mut c, _o, agent) = intents_setup();
         approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
         assert!(intent(&mut c, &agent, NEAR, T0));
-        assert_eq!(c.get_policy(agent).unwrap().spent_in_window.0, NEAR);
+        assert_eq!(
+            c.get_policy(agent).unwrap().spent_in_window.0,
+            NEAR + INTENT_OVERHEAD
+        );
+    }
+
+    #[test]
+    fn a_one_yocto_intent_consumes_one_plus_the_overhead() {
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, 1, T0 + 10 * MIN_NS);
+        assert!(intent(&mut c, &agent, 1, T0));
+        assert_eq!(
+            c.get_policy(agent).unwrap().spent_in_window.0,
+            1 + INTENT_OVERHEAD
+        );
+    }
+
+    #[test]
+    fn daily_boundary_counts_the_overhead() {
+        let list = vec![appr(NEAR, T0 + MIN_NS, 1, &hash())];
+        let d = deposit_acct();
+        let mut s = base(&list);
+        s.spent_in_window = s.daily_cap - NEAR - INTENT_OVERHEAD;
+        assert_eq!(check_intent(&s, 0, &d, NEAR), Ok(0));
+        s.spent_in_window += 1;
+        assert_eq!(check_intent(&s, 0, &d, NEAR), Err("over_daily_cap"));
+        let mut big = base(&list);
+        big.spent_in_window = u128::MAX;
+        assert_eq!(check_intent(&big, 0, &d, NEAR), Err("over_daily_cap"));
+        let mut huge = base(&list);
+        huge.per_tx_cap = u128::MAX;
+        huge.daily_cap = u128::MAX;
+        let max_list = vec![appr(u128::MAX, T0 + MIN_NS, 1, &hash())];
+        huge.approvals = &max_list;
+        assert_eq!(check_intent(&huge, 0, &d, u128::MAX), Err("over_daily_cap"));
+    }
+
+    #[test]
+    fn a_denied_intent_counts_nothing_in_the_window() {
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, 2 * NEAR, T0 + 10 * MIN_NS);
+        set_ctx(&agent, T0);
+        assert!(c.spend(accounts(2), U128(2 * NEAR), None));
+        assert!(c.spend(accounts(2), U128(NEAR + NEAR / 2 + NEAR / 4), None));
+        let before = c.get_policy(agent.clone()).unwrap().spent_in_window.0;
+        assert!(!intent(&mut c, &agent, 2 * NEAR, T0));
+        assert!(intent_denied_with("over_daily_cap"));
+        set_ctx(&agent, T0);
+        assert_eq!(c.get_policy(agent).unwrap().spent_in_window.0, before);
     }
 
     #[test]
