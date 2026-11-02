@@ -2334,9 +2334,11 @@ mod tests {
 
     #[test]
     fn gas_numbers_fit_the_transaction_limit() {
-        assert!(MIN_INTENT_GAS_TGAS + 100 <= 300);
-        assert!(4 * ACTION_GAS_TGAS <= MIN_INTENT_GAS_TGAS);
-        assert!(UNWRAP_ACTION_GAS_TGAS <= MIN_UNWRAP_GAS_TGAS);
+        const {
+            assert!(MIN_INTENT_GAS_TGAS + 100 <= 300);
+            assert!(4 * ACTION_GAS_TGAS <= MIN_INTENT_GAS_TGAS);
+            assert!(UNWRAP_ACTION_GAS_TGAS <= MIN_UNWRAP_GAS_TGAS);
+        }
     }
 
     #[test]
