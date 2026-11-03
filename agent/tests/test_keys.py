@@ -7,7 +7,7 @@ from pathlib import Path
 
 from leash_agent import keys
 from leash_agent.callpath import CallPathError
-from leash_agent.chain import STDOUT_SENTINEL
+from leash_agent.chain import STDOUT_SENTINEL, ChainError
 from tests.test_callpath import make_config, value_after
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -190,6 +190,14 @@ class Files:
         path.write_text(json.dumps({"account_id": account, "public_key": public, "private_key": secret}))
         return path
 
+    def link(self, network, account, public, mode=0o600):
+        """The account-level file the CLI opens first."""
+        path = self.home / ".near-credentials" / network / f"{account}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"account_id": account, "public_key": public, "private_key": "ed25519:SECRETSECRET"}))
+        os.chmod(path, mode)
+        return path
+
 
 class MainnetVerify(unittest.TestCase):
     def setUp(self):
@@ -207,6 +215,8 @@ class MainnetVerify(unittest.TestCase):
     def function_call_files(self):
         self.files.put("mainnet", "g.near", "ed25519:K0")
         self.files.put("mainnet", "a.near", "ed25519:K0")
+        self.files.link("mainnet", "g.near", "ed25519:K0")
+        self.files.link("mainnet", "a.near", "ed25519:K0")
 
     def test_function_call_keys_only_passes_and_changes_nothing(self):
         self.function_call_files()
@@ -251,6 +261,41 @@ class MainnetVerify(unittest.TestCase):
         for listed in ("", "ed25519:OTHER", "OWNERDEVICE", "ed25519:OWNERDEVICE2"):
             code, _ = self.verify(answers, env=dict(MAIN_ENV, LEASH_KNOWN_FULL_ACCESS_KEYS=listed))
             self.assertEqual(code, 1, listed)
+
+    def test_a_key_only_in_the_account_folder_fails_because_the_cli_opens_the_account_file_first(self):
+        self.files.put("mainnet", "g.near", "ed25519:K0")
+        self.files.put("mainnet", "a.near", "ed25519:K0")
+        code, _ = self.verify()
+        self.assertEqual(code, 1)
+        self.assertIn("g.near.json is missing or unreadable", "\n".join(self.lines))
+
+    def test_the_account_file_must_hold_the_planned_key_and_be_private(self):
+        self.function_call_files()
+        self.files.link("mainnet", "g.near", "ed25519:K0", mode=0o644)
+        code, _ = self.verify()
+        self.assertEqual(code, 1)
+        self.assertIn("g.near.json is readable by others", "\n".join(self.lines))
+        self.lines.clear()
+        self.files.link("mainnet", "g.near", "ed25519:K0")
+        self.files.link("mainnet", "a.near", "ed25519:NOTONCHAIN")
+        code, _ = self.verify()
+        self.assertEqual(code, 1)
+        self.assertIn("a.near.json does not hold a function-call key", "\n".join(self.lines))
+
+    def test_an_empty_key_list_is_unknown_never_ok(self):
+        empty = {"result": {"keys": []}}
+        with self.assertRaisesRegex(ChainError, "empty, which is unknown"):
+            keys.describe(empty, "g.testnet", "v.testnet", ("approve_intent",), "0.07")
+        self.function_call_files()
+        with self.assertRaises(CallPathError):
+            self.verify({"g.near": empty, "a.near": empty})
+
+    def test_the_funding_of_the_two_accounts_is_above_the_reserved_cost(self):
+        self.assertGreater(float(keys.GUARDIAN_FUNDING_MAINNET), 0.031)
+        self.assertGreater(float(keys.AGENT_FUNDING_MAINNET), 0.151)
+        self.function_call_files()
+        self.verify()
+        self.assertIn("guardian 0.08 NEAR, agent 0.25 NEAR", "\n".join(self.lines))
 
     def test_no_function_call_key_file_means_the_machine_cannot_sign(self):
         self.files.put("mainnet", "g.near", "ed25519:K0")
@@ -318,6 +363,21 @@ class Aside(unittest.TestCase):
         link.write_text("keep")
         keys.link_account_file(self.cfg, {"g.testnet": self.answers["g.testnet"]}, self.home)
         self.assertEqual(link.read_text(), "keep")
+
+    def test_a_skipped_link_says_why(self):
+        # two function-call key files: not exactly one
+        self.files.put("testnet", "g.testnet", "ed25519:K1", name="copy.json")
+        # an account file that holds a dead key stays in place and is named
+        self.files.link("testnet", "a.testnet", "ed25519:DEAD")
+        self.run_aside()
+        text = "\n".join(self.lines)
+        self.assertIn("g.testnet: 2 function-call key files found, not exactly one; g.testnet.json was not written", text)
+        self.assertIn("a.testnet: a.testnet.json already exists and does not hold a function-call key of the account; left in place", text)
+
+    def test_an_account_file_that_already_holds_the_key_is_reported_as_in_place(self):
+        self.files.link("testnet", "g.testnet", "ed25519:K1")
+        self.run_aside()
+        self.assertIn("g.testnet: g.testnet.json already exists and holds a function-call key of the account; left in place", "\n".join(self.lines))
 
     def test_nothing_is_linked_without_the_aside_flag(self):
         self.run_aside(aside=False)

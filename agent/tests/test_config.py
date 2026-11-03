@@ -80,3 +80,40 @@ class EnvFile(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OwnerOverride(unittest.TestCase):
+    IMPLICIT = "ab" * 32
+
+    def config(self, network, owner=None):
+        from leash_agent.config import Config
+        env = {"NETWORK": network, "LEASH_PREFIX": "leash"}
+        if owner is not None:
+            env["LEASH_OWNER"] = owner
+        with mock.patch.dict(os.environ, env, clear=False):
+            if owner is None:
+                os.environ.pop("LEASH_OWNER", None)
+            return Config.from_env()
+
+    def test_the_default_owner_follows_the_prefix_and_the_network(self):
+        self.assertEqual(self.config("mainnet").owner, "leash-owner.near")
+        self.assertEqual(self.config("testnet").owner, "leash-owner.testnet")
+
+    def test_an_implicit_owner_is_accepted_on_both_networks_and_the_others_keep_their_names(self):
+        for network, suffix in (("mainnet", "near"), ("testnet", "testnet")):
+            cfg = self.config(network, self.IMPLICIT)
+            self.assertEqual(cfg.owner, self.IMPLICIT)
+            self.assertEqual((cfg.vault, cfg.guardian, cfg.agent), (f"leash-vault.{suffix}", f"leash-guardian.{suffix}", f"leash-agent.{suffix}"))
+
+    def test_a_bad_owner_is_refused_without_echoing_it(self):
+        for bad in ("A.near", "x; echo PWNED", "a b", "-a.near", "a..near", "a", "ab" * 33):
+            with self.assertRaises(EnvFileError) as ctx:
+                self.config("mainnet", bad)
+            self.assertNotIn("PWNED", str(ctx.exception))
+
+    def test_the_mainnet_guard_accepts_an_implicit_owner(self):
+        from leash_agent.guard import check
+        check("mainnet", [self.IMPLICIT, "leash-vault.near"], {"LEASH_ALLOW_MAINNET": "1"})
+        with self.assertRaises(Exception):
+            check("mainnet", ["leash-owner.testnet"], {"LEASH_ALLOW_MAINNET": "1"})
+

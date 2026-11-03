@@ -184,7 +184,7 @@ def intents_call(cfg, args, runner) -> int:
         except IntentsError as exc:
             print(f"-- balance around the last spend\nnot shown: {scrub(str(exc))}")
         return 0
-    extra = []
+    extra, hooks = [], {}
     try:
         if cmd == "intents-keys":
             return keys.run(cfg, confirmed=args.yes, runner=runner, aside=args.aside)
@@ -208,7 +208,10 @@ def intents_call(cfg, args, runner) -> int:
                 if args.deposit_account or args.quote_hash:
                     raise callpath.CallPathError("outside testnet the deposit address and the hash come only from the guardian's saved quote; do not pass them")
                 built, extra = swap.prepare_approval(
-                    cfg, Vault(cfg, runner=runner), GuardianLog.from_env(), args.route, args.amount, record=args.yes, max_minutes=args.minutes)
+                    cfg, Vault(cfg, runner=runner), GuardianLog.from_env(), args.route, args.amount, record=False, max_minutes=args.minutes)
+                if args.yes:
+                    hooks = {"before_send": lambda: swap.record_approval(cfg, GuardianLog.from_env(), built),
+                             "on_failure": lambda: swap.record_send_failed(cfg, GuardianLog.from_env(), built, "approval")}
         else:
             if cfg.network == "testnet":
                 if not args.deposit_account:
@@ -219,7 +222,7 @@ def intents_call(cfg, args, runner) -> int:
                 callpath.guard_or_raise(cfg, accounts)
                 if args.deposit_account:
                     raise callpath.CallPathError("outside testnet the deposit account comes only from the last approved quote; do not pass one")
-                built, extra = swap.prepare_spend(cfg, GuardianLog.from_env(), args.route, args.amount, record=args.yes)
+                built, extra = swap.prepare_spend(cfg, GuardianLog.from_env(), args.route, args.amount, record=False)
         if cmd == "intents-spend" and args.yes:
             balance = swap.read_balance(cfg, runner)
             if balance is None and cfg.network != "testnet":
@@ -227,9 +230,14 @@ def intents_call(cfg, args, runner) -> int:
             if balance is None:
                 extra = [*extra, "note: the vault balance before the spend could not be read (testnet), so none is saved"]
             else:
-                swap.record_balance_before(cfg, GuardianLog.from_env(), built, balance)
                 extra = [*extra, f"vault available balance before the spend, saved in the private log: {callpath.yocto_to_near(balance)} NEAR"]
-        output = callpath.execute(cfg, built, accounts, confirmed=args.yes, runner=runner, extra=extra)
+            if cfg.network != "testnet":  # the log is written right before the send, after every refusal
+                hooks = {"before_send": lambda: swap.record_spend(cfg, GuardianLog.from_env(), built, balance),
+                         "on_failure": lambda: (swap.record_send_failed(cfg, GuardianLog.from_env(), built, "spend"),
+                                                print("note: the CLI error does not prove that the transaction did not land; run make intents-status before any retry", file=sys.stderr))[0]}
+            elif balance is not None:
+                hooks = {"before_send": lambda: swap.record_balance_before(cfg, GuardianLog.from_env(), built, balance)}
+        output = callpath.execute(cfg, built, accounts, confirmed=args.yes, runner=runner, extra=extra, **hooks)
     except (callpath.CallPathError, IntentsError, ChainError, ValueError) as exc:
         print(f"error: {scrub(str(exc))}", file=sys.stderr)
         return 1
@@ -271,7 +279,7 @@ def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, mod
     sub.add_parser("intents-status", help="read-only: approvals, stats, policy counters and vault balance")
     keyp = sub.add_parser("intents-keys", help="testnet: add the guardian and agent function-call keys (plan only without --yes); mainnet: read-only check")
     keyp.add_argument("--yes", action="store_true")
-    keyp.add_argument("--aside", action="store_true", help="testnet: after adding, move creation-key files off this machine (never deletes)")
+    keyp.add_argument("--aside", action="store_true", help="testnet: after adding, move creation-key files to a folder beside the keychain (the files are moved, not deleted)")
     for name, text in (("intents-config", "owner: set the wNEAR contract and the guardian (1 yocto; revokes approvals)"),
                        ("intents-routes", "owner: set route 0 from LEASH_ROUTE_DEST_ASSET and LEASH_ROUTE_RECIPIENT (1 yocto)")):
         owner = sub.add_parser(name, help=text)

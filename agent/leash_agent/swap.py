@@ -34,6 +34,34 @@ def _ns(moment: datetime.datetime) -> int:
     return int(moment.timestamp() * 1_000_000) * 1000
 
 
+def _failed_after(entries: list[dict], index: int, what: str, deposit: object) -> bool:
+    """True if a later `send_failed` entry says that this approval or spend never reached the chain."""
+    return any(e.get("event") == "send_failed" and e.get("what") == what and e.get("deposit_address") == deposit for e in entries[index + 1:])
+
+
+def record_approval(cfg: Config, log: GuardianLog, built: list[str], now: datetime.datetime | None = None) -> None:
+    """Write `approval_sent` from the arguments about to be sent. Called immediately before the send."""
+    data = callpath._payload_of(built)
+    log.append({"event": "approval_sent", "ts": (now or utc_now()).isoformat(), "agent": cfg.agent, "route_id": data.get("route_id"),
+                "amount": str(data.get("amount")), "deposit_address": data.get("deposit_account"), "quote_hash": data.get("quote_hash"),
+                "expires_ns": str(data.get("expires_ns"))})
+
+
+def record_spend(cfg: Config, log: GuardianLog, built: list[str], balance: int | None, now: datetime.datetime | None = None) -> None:
+    """Write `spend_sent` and the balance before it, immediately before the send."""
+    data = callpath._payload_of(built)
+    log.append({"event": "spend_sent", "ts": (now or utc_now()).isoformat(), "agent": cfg.agent, "route_id": data.get("route_id"),
+                "amount": str(data.get("amount")), "deposit_address": data.get("deposit_account"), "quote_hash": None})
+    if balance is not None:
+        record_balance_before(cfg, log, built, balance, now)
+
+
+def record_send_failed(cfg: Config, log: GuardianLog, built: list[str], what: str, now: datetime.datetime | None = None) -> None:
+    data = callpath._payload_of(built)
+    log.append({"event": "send_failed", "what": what, "ts": (now or utc_now()).isoformat(), "agent": cfg.agent, "route_id": data.get("route_id"),
+                "amount": str(data.get("amount")), "deposit_address": data.get("deposit_account")})
+
+
 def prepare_approval(
     cfg: Config, vault: Vault, log: GuardianLog, route_id: int, amount_near: str, *, record: bool,
     max_minutes: int | None = None, now: datetime.datetime | None = None, max_per_hour: int = DEFAULT_MAX_PER_HOUR,
@@ -59,11 +87,19 @@ def prepare_approval(
         minutes = min(callpath.MAX_APPROVAL_MINUTES, max_minutes or callpath.MAX_APPROVAL_MINUTES, int((deadline - now).total_seconds() // 60))
         if minutes < 1:
             raise CallPathError(f"the saved quote's deadline ({iso(deadline)}) has passed or is less than a minute away: ask for a new quote")
-        if any(e.get("event") == "approval_sent" and e.get("deposit_address") == deposit for e in entries):
+        if any(e.get("event") == "approval_sent" and e.get("deposit_address") == deposit and not _failed_after(entries, i, "approval", deposit)
+               for i, e in enumerate(entries)):
             raise CallPathError("this quote was already approved; an approval is single use: ask for a new quote")
+        try:
+            on_chain = vault.view("get_approvals", {"agent": cfg.agent})
+        except ChainError as exc:
+            raise CallPathError(f"the approvals on the chain could not be read, so nothing was approved: {exc}") from exc
+        if isinstance(on_chain, list) and any(isinstance(a, dict) and a.get("deposit_account") == deposit for a in on_chain):
+            raise CallPathError("the chain already holds an approval for this quote's deposit account; an approval is single use: ask for a new quote")
         recent = 0
-        for entry in entries:
-            if entry.get("event") == "approval_sent" and now - _when(entry.get("ts"), "time") < datetime.timedelta(hours=1):
+        for i, entry in enumerate(entries):
+            if entry.get("event") == "approval_sent" and now - _when(entry.get("ts"), "time") < datetime.timedelta(hours=1) \
+                    and not _failed_after(entries, i, "approval", entry.get("deposit_address")):
                 recent += 1
         if recent >= max_per_hour:
             raise CallPathError(f"rate_limit: {recent} approvals in the last hour (limit {max_per_hour})")
@@ -75,9 +111,8 @@ def prepare_approval(
         digest = quote_hash(response)
         args = callpath.approve_intent_args(cfg, route_id, deposit, amount_near, minutes, digest, now_ns=_ns(now))
         expires = now + datetime.timedelta(minutes=minutes)
-        if record:
-            log.append({"event": "approval_sent", "ts": now.isoformat(), "agent": cfg.agent, "route_id": route_id,
-                        "amount": str(amount), "deposit_address": deposit, "quote_hash": digest, "expires_ns": str(_ns(expires))})
+        if record:  # the CLI path records right before the send instead (record_approval)
+            record_approval(cfg, log, args, now)
     extra = [
         f"deposit account and hash come from the saved quote ({iso(quoted_at)}), not from the command line: hash {digest}",
         f"approval lifetime {minutes} min, expires {iso(expires)} (UTC); quote deadline {iso(deadline)}",
@@ -92,7 +127,8 @@ def prepare_spend(
     now = now or utc_now()
     amount = int(near_to_yocto(amount_near))
     entries = log.entries()
-    sent = [e for e in entries if e.get("event") == "approval_sent" and e.get("agent") == cfg.agent and e.get("route_id") == route_id]
+    sent = [e for i, e in enumerate(entries) if e.get("event") == "approval_sent" and e.get("agent") == cfg.agent and e.get("route_id") == route_id
+            and not _failed_after(entries, i, "approval", e.get("deposit_address"))]
     if not sent:
         raise CallPathError("no approval in the guardian log for this route: run make intents-approve first")
     approval = sent[-1]
@@ -107,12 +143,12 @@ def prepare_spend(
         raise CallPathError("the logged approval has no valid expiry") from exc
     if expires_ns <= _ns(now):
         raise CallPathError(f"the last approval expired at {callpath.utc_text(expires_ns)}: ask for a new quote and approval")
-    if record:
-        log.append({"event": "spend_sent", "ts": now.isoformat(), "agent": cfg.agent, "route_id": route_id,
-                    "amount": str(amount), "deposit_address": deposit, "quote_hash": approval.get("quote_hash")})
     args = callpath.spend_intent_args(cfg, route_id, deposit, amount_near)
+    if record:  # the CLI path records right before the send instead (record_spend)
+        record_spend(cfg, log, args, None, now)
     extra = [f"deposit account comes from the last approved quote (hash {approval.get('quote_hash')}); approval expires {callpath.utc_text(expires_ns)}"]
-    earlier = [e for e in entries if e.get("event") == "spend_sent" and e.get("deposit_address") == deposit]
+    earlier = [e for i, e in enumerate(entries) if e.get("event") == "spend_sent" and e.get("deposit_address") == deposit
+               and not _failed_after(entries, i, "spend", deposit)]
     if earlier:
         extra.append(f"WARNING: an earlier spend for this approval was sent at {earlier[-1].get('ts')}; run make intents-status before sending again "
                      "(a retry is only right if that spend failed before it counted anything)")

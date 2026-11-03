@@ -10,7 +10,7 @@ from unittest import mock
 
 from leash_agent import callpath, swap
 from leash_agent.__main__ import main
-from leash_agent.chain import STDOUT_SENTINEL, Snapshot
+from leash_agent.chain import STDOUT_SENTINEL, ChainError, Snapshot
 from leash_agent.guardian import GuardianLog
 from leash_agent.intents import iso, utc_now
 from tests.test_callpath import HEX64, RECIPIENT, make_config, payload, value_after
@@ -28,7 +28,12 @@ def snap(**over):
 
 class FakeVault:
     def __init__(self, snapshot=None):
-        self.snapshot_value, self.reads = snapshot or snap(), 0
+        self.snapshot_value, self.reads, self.approvals, self.view_error = snapshot or snap(), 0, [], None
+
+    def view(self, method, args=None):
+        if self.view_error:
+            raise self.view_error
+        return self.approvals if method == "get_approvals" else []
 
     def snapshot(self):
         self.reads += 1
@@ -479,6 +484,85 @@ class RepeatedSpendWarning(Base):
                   "deposit_address": HEX64, "quote_hash": "ab" * 32, "expires_ns": str(int(self.now.timestamp() * 1e6) * 1000 + 10 * 60 * 10**9)})
         _, extra = swap.prepare_spend(self.cfg, self.log, 0, "0.1", record=False, now=self.now)
         self.assertFalse([line for line in extra if "WARNING" in line])
+
+
+class FlakyChain(Chain):
+    """A fake `near` whose transactions can be refused by the node and whose views can fail or show approvals."""
+
+    def __init__(self, log=None, fail_tx=0, approvals=None, fail_views=(), **kw):
+        super().__init__(**kw)
+        self.log, self.fail_tx, self.approvals, self.fail_views, self.log_at_send = log, fail_tx, approvals or [], fail_views, []
+
+    def __call__(self, args):
+        if "as-read-only" in args:
+            if args[5] in self.fail_views:
+                raise ChainError("view refused")
+            if args[5] == "get_approvals":
+                return STDOUT_SENTINEL + json.dumps(self.approvals)
+            return super().__call__(args)
+        self.log_at_send.append([e.get("event") for e in self.log.entries()] if self.log else [])
+        if self.fail_tx > 0:
+            self.fail_tx -= 1
+            raise ChainError("node refused the call")
+        return super().__call__(args)
+
+
+class SendOrder(Base):
+    """The private log is written right before the send, after every refusal, and a failed send is recorded as failed."""
+
+    def approve_cli(self, chain):
+        return self.run_main(["intents-approve", "--amount", "0.1", "--yes"], chain)
+
+    def test_the_approval_is_logged_immediately_before_the_send_and_a_refused_send_does_not_block_a_retry(self):
+        self.add(quote_entry(self.cfg, utc_now()))
+        chain = FlakyChain(self.log, fail_tx=1)
+        code, _, err = self.approve_cli(chain)
+        self.assertEqual(code, 1)
+        self.assertEqual(chain.log_at_send[0].count("approval_sent"), 1)  # already in the log when the CLI was called
+        self.assertEqual(len(self.events("send_failed")), 1)
+        code, _, err = self.approve_cli(chain)  # the retry is not refused as "already approved"
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(chain.calls), 1)
+
+    def test_a_refusal_before_the_send_leaves_no_trace_in_the_log(self):
+        self.add(quote_entry(self.cfg, utc_now()))
+        self.add({"event": "approval_sent", "ts": utc_now().isoformat(), "agent": self.cfg.agent, "route_id": 0, "amount": str(NEAR // 10),
+                  "deposit_address": HEX64, "quote_hash": "ab" * 32, "expires_ns": str(int(utc_now().timestamp() * 1e6) * 1000 + 10 * 60 * 10**9)})
+        chain = FlakyChain(self.log, fail_views=("get_policy",))
+        code, _, err = self.run_main(["intents-spend", "--amount", "0.1", "--yes"], chain)
+        self.assertEqual(code, 1)
+        self.assertIn("nothing was sent", err)
+        self.assertEqual((chain.calls, self.events("spend_sent"), self.events("spend_balance_before"), self.events("send_failed")), ([], [], [], []))
+
+    def test_the_chain_is_the_truth_for_an_existing_approval(self):
+        self.add(quote_entry(self.cfg, utc_now()))
+        chain = FlakyChain(self.log, approvals=[{"deposit_account": HEX64, "amount": str(NEAR // 10)}])
+        code, _, err = self.approve_cli(chain)
+        self.assertEqual(code, 1)
+        self.assertIn("the chain already holds an approval", err)
+        self.assertEqual((chain.calls, self.events("approval_sent")), ([], []))
+
+    def test_unreadable_approvals_on_the_chain_stop_the_approval(self):
+        self.add(quote_entry(self.cfg, utc_now()))
+        chain = FlakyChain(self.log, fail_views=("get_approvals",))
+        code, _, err = self.approve_cli(chain)
+        self.assertEqual(code, 1)
+        self.assertIn("could not be read, so nothing was approved", err)
+        self.assertEqual((chain.calls, self.events("approval_sent")), ([], []))
+
+    def test_a_failed_spend_is_logged_and_the_retry_has_no_false_warning(self):
+        self.add(quote_entry(self.cfg, utc_now()))
+        self.assertEqual(self.approve_cli(FlakyChain(self.log))[0], 0)
+        chain = FlakyChain(self.log, fail_tx=1)
+        code, _, err = self.run_main(["intents-spend", "--amount", "0.1", "--yes"], chain)
+        self.assertEqual(code, 1)
+        self.assertIn("does not prove that the transaction did not land", err)
+        self.assertIn("spend_sent", chain.log_at_send[0])
+        self.assertIn("spend_balance_before", chain.log_at_send[0])
+        self.assertEqual(len(self.events("send_failed")), 1)
+        code, out, err = self.run_main(["intents-spend", "--amount", "0.1", "--yes"], chain)
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("WARNING", out)
 
 
 if __name__ == "__main__":

@@ -214,8 +214,12 @@ def execute(
     cfg: Config, args: list[str], accounts: list[str], *, confirmed: bool,
     runner: Callable[[list[str]], str] = run_near, env: Mapping[str, str] | None = None, out=print,
     extra: tuple[str, ...] | list[str] = (),
+    before_send: Callable[[], None] | None = None, on_failure: Callable[[], None] | None = None,
 ) -> str | None:
-    """Guard, show the plan, and send only when confirmed. Returns the scrubbed output, or None for a plan only."""
+    """Guard, show the plan, and send only when confirmed. Returns the scrubbed output, or None for a plan only.
+
+    `before_send` runs after every refusal, immediately before the transaction is handed to the CLI; `on_failure` runs if the CLI fails.
+    """
     guard_or_raise(cfg, accounts, env)
     method, sends = args[5], args[3] == "as-transaction"
     if sends:
@@ -234,9 +238,13 @@ def execute(
         if not confirmed:
             out("plan only: nothing sent. Add --yes to send.")
             return None
+    if sends and before_send is not None:
+        before_send()
     try:
         raw = runner(args)
     except ChainError as exc:
+        if sends and on_failure is not None:
+            on_failure()
         raise CallPathError(scrub(f"FAILED: {exc} (the CLI exit code of a failed on-chain call is unverified; check the explorer)")) from exc
     text = scrub(raw.replace(STDOUT_SENTINEL, "\n"))
     return f"{text}\nRESULT: {scrub(interpret(method, raw))}" if sends else text

@@ -16,11 +16,12 @@ from .chain import ChainError, run_near
 from .config import Config
 from .redact import scrub
 
-# Allowance in NEAR. The node checks it against the reserved cost of a call, about 0.001 NEAR per prepaid Tgas plus 0.001 (measured on testnet).
-# Guardian: two calls at 30 Tgas. Agent: two calls at 150 Tgas.
+# Allowance in NEAR: the most gas a leaked function-call key can burn. The node refuses a call whose reserved cost
+# (about 0.001 NEAR per prepaid Tgas plus 0.001, measured on testnet) is above the allowance or the account balance.
 GUARDIAN_METHODS, GUARDIAN_ALLOWANCE = ("approve_intent",), "0.07"
 AGENT_METHODS, AGENT_ALLOWANCE = ("spend", "spend_intent"), "0.31"
-AGENT_FUNDING_MAINNET = "0.10"
+# Account balances on mainnet, set when the accounts are created: above the reserved cost of one call (0.031 and 0.151 NEAR).
+GUARDIAN_FUNDING_MAINNET, AGENT_FUNDING_MAINNET = "0.08", "0.25"
 RPC_URLS = {"testnet": "https://test.rpc.fastnear.com", "mainnet": "https://free.rpc.fastnear.com"}  # docs.near.org/api/rpc/providers
 
 
@@ -78,6 +79,8 @@ def describe(
         rows = [(str(k["public_key"]), k["access_key"]["permission"]) for k in keys]
     except (KeyError, TypeError) as exc:
         raise ChainError(f"unreadable key list for {account}: {exc!r}") from exc
+    if not rows:
+        raise ChainError(f"the key list for {account} came back empty, which is unknown and not OK (the read may lag behind the transaction); run it again")
     lines, bad = [], False
     for public_key, permission in rows:
         call = permission.get("FunctionCall") if isinstance(permission, dict) else None
@@ -147,8 +150,27 @@ def verify_local(cfg: Config, fetch: Callable[[str, str], object], home: Path, e
         if usable == 0:
             out(f"{account}: no function-call key file on this machine, so this machine cannot sign for it")
             problems = True
+        problems = account_file_problem(cfg, account, chain, home, out) or problems
     out("PROBLEM: see above. Nothing was changed." if problems else "OK: this machine holds only function-call keys for the guardian and the agent, and no unknown full-access key is on either account.")
     return 1 if problems else 0
+
+
+def account_file_problem(cfg: Config, account: str, chain: dict[str, bool], home: Path, out) -> bool:
+    """The CLI opens `<account>.json` first: it must exist, hold a function-call key of the account and be private (mode 0600)."""
+    target = home / ".near-credentials" / cfg.network / f"{account}.json"
+    try:
+        public = json.loads(target.read_text()).get("public_key")
+        mode = target.stat().st_mode & 0o777
+    except (OSError, ValueError, AttributeError):
+        out(f"{account}: {target.name} is missing or unreadable; the CLI opens it first, so signing would fail")
+        return True
+    if chain.get(public) is not False:
+        out(f"{account}: {target.name} does not hold a function-call key of the account, so signing would fail or use the wrong key")
+        return True
+    if mode & 0o077:
+        out(f"{account}: {target.name} is readable by others (mode {oct(mode)[2:]}); it must be 600")
+        return True
+    return False
 
 
 def move_aside(cfg: Config, answers: dict[str, object], home: Path) -> list[str]:
@@ -174,6 +196,13 @@ def move_aside(cfg: Config, answers: dict[str, object], home: Path) -> list[str]
     return lines
 
 
+def _holds_function_call_key(path: Path, chain: dict[str, bool]) -> bool:
+    try:
+        return chain.get(json.loads(path.read_text()).get("public_key")) is False
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def link_account_file(cfg: Config, answers: dict[str, object], home: Path) -> list[str]:
     """After the creation key is moved aside, copy the one function-call key file to `<account>.json`, where the CLI looks first."""
     lines = []
@@ -182,7 +211,13 @@ def link_account_file(cfg: Config, answers: dict[str, object], home: Path) -> li
         target = base / f"{account}.json"
         chain = _on_chain(answers[account], account)
         usable = [path for path, public in local_key_files(account, cfg.network, home) if chain.get(public) is False and path != target]
-        if target.exists() or len(usable) != 1:
+        if target.exists():
+            holds = _holds_function_call_key(target, chain)
+            lines.append(f"{account}: {target.name} already exists and " + ("holds a function-call key of the account; left in place" if holds
+                         else "does not hold a function-call key of the account; left in place, so the CLI will not find the new key"))
+            continue
+        if len(usable) != 1:
+            lines.append(f"{account}: {len(usable)} function-call key files found, not exactly one; {target.name} was not written")
             continue
         shutil.copyfile(usable[0], target)
         os.chmod(target, 0o600)
@@ -204,6 +239,7 @@ def run(
         if confirmed or aside:
             raise CallPathError("on mainnet this command only verifies: the function-call keys are created on the owner's device. Nothing was changed")
         out("mainnet: read-only check of the guardian and agent keys. Nothing is added, moved or deleted.")
+        out(f"account balances set at creation: guardian {GUARDIAN_FUNDING_MAINNET} NEAR, agent {AGENT_FUNDING_MAINNET} NEAR (the node reserves about 0.031 and 0.151 NEAR per call)")
         return verify_local(cfg, fetch, home, env, out)
     if found:
         out("note: testnet only: an owner key file is on this machine; on mainnet this command refuses to run")
@@ -240,7 +276,7 @@ def run(
         for line in move_aside(cfg, answers, home) + link_account_file(cfg, answers, home):
             out(line)
     if problems:
-        out("A key is full access or not as planned. On testnet the creation key stays on the chain; use --aside to move its file off this machine.")
+        out("A key is full access or not as planned. On testnet the creation key stays on the chain; use --aside to move its file to a folder beside the keychain.")
         return 0
     out("OK: only the planned function-call keys exist on both accounts.")
     return 0

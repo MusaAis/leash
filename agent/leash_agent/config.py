@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -67,6 +68,16 @@ def intent_gas_tgas(raw: str | None) -> int:
     return value
 
 
+def owner_override(raw: str | None) -> str:
+    """LEASH_OWNER: an owner account that is not `<prefix>-owner.<suffix>`, for example a 64-character implicit account."""
+    if raw is None or raw.strip() == "":
+        return ""
+    value = raw.strip()
+    if not re.fullmatch(r"([a-z\d]+[-_])*[a-z\d]+(\.([a-z\d]+[-_])*[a-z\d]+)*", value) or not 2 <= len(value) <= 64:
+        raise EnvFileError("LEASH_OWNER is not a valid NEAR account id (lowercase letters, digits, - and _, dots between parts, 2 to 64 characters)")
+    return value
+
+
 @dataclass(frozen=True)
 class Config:
     network: str
@@ -95,10 +106,11 @@ class Config:
         network = os.environ.get("NETWORK", "testnet")
         prefix = os.environ.get("LEASH_PREFIX", "leashdemo")
         suffix = ACCOUNT_SUFFIX.get(network, network)  # mainnet accounts end in .near, not .mainnet
+        owner = owner_override(os.environ.get("LEASH_OWNER")) or f"{prefix}-owner.{suffix}"
         return cls(
             network=network,
             vault=f"{prefix}-vault.{suffix}",
-            owner=f"{prefix}-owner.{suffix}",
+            owner=owner,
             agent=f"{prefix}-agent.{suffix}",
             payee=f"{prefix}-payee.{suffix}",
             attacker=f"{prefix}-attacker.{suffix}",

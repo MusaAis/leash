@@ -440,9 +440,30 @@ class MakeYes(unittest.TestCase):
             self.assertIn("--yes", self.make(target, "YES=1"), target)
 
     def test_the_vault_name_and_saved_quote_variables_reach_the_command(self):
-        self.assertIn("--confirm-vault v.testnet", self.make("intents-config", "CONFIRM_VAULT=v.testnet"))
+        self.assertIn('--confirm-vault "$CONFIRM_VAULT"', self.make("intents-config", "CONFIRM_VAULT=v.testnet"))
+        self.assertNotIn("--confirm-vault", self.make("intents-config"))
         self.assertNotIn("--deposit-account", self.make("intents-spend"))
-        self.assertIn("--deposit-account abc", self.make("intents-spend", "DEPOSIT=abc"))
+        self.assertIn('--deposit-account "$DEPOSIT"', self.make("intents-spend", "DEPOSIT=abc"))
+
+    def test_yes_and_aside_must_be_exactly_1(self):
+        for value in ("1 0", "0 1", " 1 0", "1,0", "10"):
+            for target in self.TARGETS:
+                self.assertNotIn("--yes", self.make(target, f"YES={value}"), (target, value))
+            self.assertNotIn("--aside", self.make("intents-keys", f"ASIDE={value}"), value)
+        self.assertIn("--aside", self.make("intents-keys", "ASIDE=1"))
+
+    def test_typed_values_are_never_shell_code(self):
+        import shutil
+        import subprocess
+        hostile = "x; echo PWNED"
+        for target, name in (("intents-config", "CONFIRM_VAULT"), ("intents-approve", "DEPOSIT"), ("intents-spend", "SWAP_AMOUNT"), ("intents-approve", "SWAP_AMOUNT")):
+            self.assertNotIn("PWNED", self.make(target, f"{name}={hostile}"), (target, name))
+        if not shutil.which("make"):
+            self.skipTest("make is not installed")
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        env = dict(os.environ, NETWORK="testnet")
+        proc = subprocess.run(["make", "-C", root, "intents-config", f"CONFIRM_VAULT={hostile}"], capture_output=True, text=True, timeout=60, env=env)
+        self.assertNotIn("PWNED", [line.strip() for line in proc.stdout.splitlines()])
 
 
 if __name__ == "__main__":
