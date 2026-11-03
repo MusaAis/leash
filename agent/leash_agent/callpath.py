@@ -5,13 +5,15 @@ first, prints the plan with private values scrubbed, and sends only with `confir
 """
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import re
 import time
+from decimal import Decimal, localcontext
 from typing import Callable, Mapping
 
-from .chain import STDOUT_SENTINEL, ChainError, is_valid_account_id, near_to_yocto, run_near
+from .chain import STDOUT_SENTINEL, ChainError, is_valid_account_id, near_to_yocto, parse_call_output, run_near
 from .config import Config
 from .guard import GuardError, check as guard_check
 from .redact import scrub
@@ -22,6 +24,9 @@ REHEARSAL_QUOTE_HASH = hashlib.sha256(b"leash-rehearsal-no-quote").hexdigest()  
 ONE_YOCTO = "1 yoctoNEAR"
 NO_DEPOSIT = "0 NEAR"
 OWNER_GAS = "30 Tgas"
+AGENT_CAP_METHODS = ("approve_intent", "spend_intent")  # the plan shows the agent's caps next to these
+RESULT_EVENTS = {"approve_intent": "intent_approved", "set_intents_config": "intents_configured", "set_routes": "routes_set"}
+SWAP_NOTE = "the swap itself is shown by the wNEAR receipts and the vault balance, not by this line"
 
 
 class CallPathError(Exception):
@@ -109,25 +114,129 @@ def _signer(args: list[str]) -> str:
     return args[args.index("sign-as") + 1]
 
 
-def execute(
-    cfg: Config, args: list[str], accounts: list[str], *, confirmed: bool,
-    runner: Callable[[list[str]], str] = run_near, env: Mapping[str, str] | None = None, out=print,
-) -> str | None:
-    """Guard, show the plan, and send only when confirmed. Returns the scrubbed output, or None for a plan only."""
+def yocto_to_near(value: object) -> str:
+    """Exact NEAR text for a yoctoNEAR amount, without trailing zeros."""
+    with localcontext() as ctx:
+        ctx.prec = 80
+        text = format(Decimal(int(str(value))).scaleb(-24), "f")
+    return (text.rstrip("0").rstrip(".") if "." in text else text) or "0"
+
+
+def utc_text(ns: int) -> str:
+    moment = datetime.datetime.fromtimestamp(ns / 1e9, datetime.timezone.utc)
+    return moment.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _payload_of(args: list[str]) -> dict:
+    try:
+        value = json.loads(args[args.index("json-args") + 1])
+    except (ValueError, IndexError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def plan_details(args: list[str]) -> list[str]:
+    """What will be sent, read from the call's own arguments. The route recipient is never shown."""
+    method, data = args[5], _payload_of(args)
+    if method in AGENT_CAP_METHODS:
+        line = f"route {data.get('route_id')}, deposit account {data.get('deposit_account')}, amount {yocto_to_near(data.get('amount', 0))} NEAR"
+        if method == "approve_intent":
+            line += f", approval expires {utc_text(int(data['expires_ns']))}"
+        return [line]
+    if method == "set_intents_config":
+        return [f"wNEAR contract {data.get('wnear')}, guardian {data.get('guardian')}; every pending approval stops matching"]
+    if method == "set_routes":
+        return [f"{len(data.get('routes', []))} route(s) for {data.get('agent')}; asset {data['routes'][0].get('dest_asset')}, recipient not shown"]
+    return []
+
+
+def caps_line(cfg: Config, runner: Callable[[list[str]], str]) -> str | None:
+    """The agent's caps and what is already used, from `get_policy`. None if they cannot be read."""
+    try:
+        policy = parse_call_output(runner(_view(cfg, "get_policy", {"agent": cfg.agent}))).returned
+        return (f"agent {cfg.agent} caps: per-tx {yocto_to_near(policy['per_tx_cap'])} NEAR, daily {yocto_to_near(policy['daily_cap'])} NEAR, "
+                f"already used in this window {yocto_to_near(policy['spent_in_window'])} NEAR")
+    except (ChainError, KeyError, TypeError, ValueError):
+        return None
+
+
+def _event_reason(events: list[dict], name: str) -> str | None:
+    for event in reversed(events):
+        if event.get("event") == name:
+            data = event.get("data") or [{}]
+            return str(data[0].get("reason")) if isinstance(data[0], dict) and data[0].get("reason") else None
+    return None
+
+
+def _panic_text(raw: str) -> str:
+    for line in raw.splitlines():
+        if re.search(r"panick|ExecutionError|Failure", line, re.I):
+            return line.strip(" │├└─-\t")[:300]
+    return "no panic message in the output (the CLI output of a failed on-chain call is unverified)"
+
+
+def interpret(method: str, raw: str) -> str:
+    """One line for the screen: ALLOWED, DENIED or FAILED for `spend_intent`; done or unconfirmed for the others."""
+    result = parse_call_output(raw)
+    names = {event.get("event") for event in result.events}
+    if method == "spend_intent":
+        if result.returned is True and "intent_sent" in names:
+            return f"ALLOWED: batch scheduled. Note: {SWAP_NOTE}"
+        if result.returned is False or "intent_denied" in names:
+            return f"DENIED: {_event_reason(result.events, 'intent_denied') or 'reason not found in the output'}. Note: {SWAP_NOTE}"
+        return f"FAILED: {_panic_text(raw)}. Note: {SWAP_NOTE}"
+    event = RESULT_EVENTS.get(method)
+    if event and event in names:
+        return f"DONE: the {event} event was seen"
+    if event:
+        return f"UNCONFIRMED: no {event} event in the output ({_panic_text(raw)}); check with make intents-status"
+    return "no result line for this method"
+
+
+def require_vault_name(cfg: Config, given: str | None, confirmed: bool) -> None:
+    """Owner commands that send must be given the vault name, so a wrong environment cannot send by habit."""
+    if not confirmed:
+        return
+    if not given:
+        raise CallPathError("owner commands need --confirm-vault with the vault name (make: CONFIRM_VAULT=<vault>)")
+    if given != cfg.vault:
+        raise CallPathError("--confirm-vault does not match the vault of this configuration; nothing sent")
+
+
+def guard_or_raise(cfg: Config, accounts: list[str], env: Mapping[str, str] | None = None) -> None:
     try:
         guard_check(cfg.network, accounts, env)
     except GuardError as exc:
         raise CallPathError(str(exc)) from exc
-    method = args[5]
-    if args[3] == "as-transaction":
+
+
+def execute(
+    cfg: Config, args: list[str], accounts: list[str], *, confirmed: bool,
+    runner: Callable[[list[str]], str] = run_near, env: Mapping[str, str] | None = None, out=print,
+    extra: tuple[str, ...] | list[str] = (),
+) -> str | None:
+    """Guard, show the plan, and send only when confirmed. Returns the scrubbed output, or None for a plan only."""
+    guard_or_raise(cfg, accounts, env)
+    method, sends = args[5], args[3] == "as-transaction"
+    if sends:
         gas = args[args.index("prepaid-gas") + 1]
         deposit = args[args.index("attached-deposit") + 1]
         out(scrub(f"{cfg.network}: {method} on {cfg.vault}, signed by {_signer(args)}, prepaid gas {gas}, deposit {deposit}"))
+        for line in plan_details(args):
+            out(scrub(line))
+        if method in AGENT_CAP_METHODS:
+            caps = caps_line(cfg, runner)
+            out(caps or "agent caps: could not be read")
+            if caps is None and confirmed and cfg.network != "testnet":
+                raise CallPathError("the agent's caps could not be read, so nothing was sent")
+        for line in extra:
+            out(scrub(line))
         if not confirmed:
             out("plan only: nothing sent. Add --yes to send.")
             return None
     try:
         raw = runner(args)
     except ChainError as exc:
-        raise CallPathError(scrub(str(exc))) from exc
-    return scrub(raw.replace(STDOUT_SENTINEL, "\n"))
+        raise CallPathError(scrub(f"FAILED: {exc} (the CLI exit code of a failed on-chain call is unverified; check the explorer)")) from exc
+    text = scrub(raw.replace(STDOUT_SENTINEL, "\n"))
+    return f"{text}\nRESULT: {scrub(interpret(method, raw))}" if sends else text

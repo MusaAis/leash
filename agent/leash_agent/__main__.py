@@ -10,13 +10,13 @@ import sys
 from . import __version__
 from .agent import Agent
 from .attacks import build_attacks, run_suite
-from . import callpath
+from . import callpath, keys, swap
 from .brain import Brain, list_models, missing_model_note
 from .chain import ChainError, Vault, near_to_yocto
 from .chain import run_near
 from .config import Config, EnvFileError
 from .guard import GuardError, check as guard_check
-from .guardian import EnvRoutes, Guardian, GuardianLog
+from .guardian import EnvRoutes, Guardian, GuardianLog, Refused
 from .intents import IntentsError, OneClick, QuoteRejected, find_tokens, iso, utc_now
 from .preflight import PolicySim, precheck
 from .probe import address_kind, wet_probe
@@ -123,6 +123,45 @@ def agent_signature(cfg, models, check=check_signature) -> int:
     return 0
 
 
+def intents_quote(cfg, args, oneclick, runner) -> int:
+    """Guardian: one real quote for the agent's route, verified and saved in the private log. Never paid."""
+    if cfg.network == "testnet":
+        print("error: 1Click has no testnet, so there is nothing to quote here. Use the rehearsal commands with --deposit-account.", file=sys.stderr)
+        return 1
+    try:
+        callpath.guard_or_raise(cfg, [cfg.vault, cfg.owner, cfg.agent, cfg.guardian])
+    except callpath.CallPathError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if not args.yes:
+        print("error: a real quote creates a deposit address (never pay it by hand). Add --yes.", file=sys.stderr)
+        return 1
+    asset = os.environ.get("LEASH_ROUTE_DEST_ASSET", "")
+    if not asset:
+        found = find_tokens(oneclick.tokens(), "USDC", "base")
+        if len(found) != 1:
+            raise IntentsError(f"expected exactly one USDC on base in the live token list, found {len(found)}; set LEASH_ROUTE_DEST_ASSET")
+        asset = found[0]["assetId"]
+    routes = EnvRoutes.from_env(asset)
+    guardian = Guardian(
+        agent=cfg.agent, vault_account=cfg.vault, snapshot=Vault(cfg, runner=runner).snapshot, routes=routes,
+        oneclick=oneclick, log=GuardianLog.from_env(), other_accounts=(cfg.owner, cfg.guardian, cfg.wnear),
+    )
+    try:
+        issued = guardian.quote(args.route, int(near_to_yocto(args.amount)))
+    except QuoteRejected as exc:
+        print(f"REJECTED by the guardian: {scrub(str(exc))}\n\nraw response (recipient hidden):\n{redact(exc.response, routes.get(cfg.agent, 0).recipient)}", file=sys.stderr)
+        return 1
+    except (Refused, IntentsError) as exc:
+        print(f"error: {scrub(str(exc))}", file=sys.stderr)
+        return 1
+    v = issued.verified
+    print(f"verified: amountIn={v.amount_in} amountOut={v.amount_out} minAmountOut={v.min_amount_out} timeEstimate={v.time_estimate}")
+    print(f"saved in the private guardian log at {iso(utc_now())}; deposit address {v.deposit_address}")
+    print("Nothing was deposited. Do not send funds to this address by hand. Next: make intents-approve, then make intents-spend.")
+    return 0
+
+
 def intents_call(cfg, args, runner) -> int:
     """The call path: owner config and routes, guardian approval, agent spend, read-only status."""
     cmd = args.command
@@ -136,24 +175,44 @@ def intents_call(cfg, args, runner) -> int:
                 return 1
             print(f"-- {name}\n{output}")
         return 0
+    extra = []
     try:
+        if cmd == "intents-keys":
+            return keys.run(cfg, confirmed=args.yes, runner=runner)
         if cmd == "intents-config":
+            callpath.require_vault_name(cfg, args.confirm_vault, args.yes)
             built, accounts = callpath.set_intents_config_args(cfg), [cfg.vault, cfg.owner, cfg.guardian, cfg.wnear]
         elif cmd == "intents-routes":
+            callpath.require_vault_name(cfg, args.confirm_vault, args.yes)
             built = callpath.set_routes_args(cfg, os.environ.get("LEASH_ROUTE_DEST_ASSET", ""), os.environ.get("LEASH_ROUTE_RECIPIENT", ""))
             accounts = [cfg.vault, cfg.owner, cfg.agent]
         elif cmd == "intents-approve":
-            if args.quote_hash is None and cfg.network != "testnet":
-                raise callpath.CallPathError("--quote-hash is required outside testnet (use the hash from the guardian's saved quote)")
-            built = callpath.approve_intent_args(
-                cfg, args.route, args.deposit_account, args.amount, args.minutes, args.quote_hash or callpath.REHEARSAL_QUOTE_HASH,
-            )
-            accounts = [cfg.vault, cfg.guardian, cfg.agent, args.deposit_account]
+            if cfg.network == "testnet":
+                if not args.deposit_account:
+                    raise callpath.CallPathError("on testnet pass --deposit-account (1Click has no testnet, so there is no saved quote)")
+                built = callpath.approve_intent_args(
+                    cfg, args.route, args.deposit_account, args.amount, args.minutes or 20, args.quote_hash or callpath.REHEARSAL_QUOTE_HASH)
+                accounts = [cfg.vault, cfg.guardian, cfg.agent, args.deposit_account]
+            else:
+                accounts = [cfg.vault, cfg.guardian, cfg.agent]
+                callpath.guard_or_raise(cfg, accounts)  # first, before anything is read or recorded
+                if args.deposit_account or args.quote_hash:
+                    raise callpath.CallPathError("outside testnet the deposit address and the hash come only from the guardian's saved quote; do not pass them")
+                built, extra = swap.prepare_approval(
+                    cfg, Vault(cfg, runner=runner), GuardianLog.from_env(), args.route, args.amount, record=args.yes, max_minutes=args.minutes)
         else:
-            built = callpath.spend_intent_args(cfg, args.route, args.deposit_account, args.amount)
-            accounts = [cfg.vault, cfg.agent, args.deposit_account]
-        output = callpath.execute(cfg, built, accounts, confirmed=args.yes, runner=runner)
-    except (callpath.CallPathError, ValueError) as exc:
+            if cfg.network == "testnet":
+                if not args.deposit_account:
+                    raise callpath.CallPathError("on testnet pass --deposit-account")
+                built, accounts = callpath.spend_intent_args(cfg, args.route, args.deposit_account, args.amount), [cfg.vault, cfg.agent, args.deposit_account]
+            else:
+                accounts = [cfg.vault, cfg.agent]
+                callpath.guard_or_raise(cfg, accounts)
+                if args.deposit_account:
+                    raise callpath.CallPathError("outside testnet the deposit account comes only from the last approved quote; do not pass one")
+                built, extra = swap.prepare_spend(cfg, GuardianLog.from_env(), args.route, args.amount, record=args.yes)
+        output = callpath.execute(cfg, built, accounts, confirmed=args.yes, runner=runner, extra=extra)
+    except (callpath.CallPathError, IntentsError, ChainError, ValueError) as exc:
         print(f"error: {scrub(str(exc))}", file=sys.stderr)
         return 1
     if output is not None:
@@ -192,17 +251,26 @@ def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, mod
     gd.add_argument("--network", required=True)
     gd.add_argument("accounts", nargs="+")
     sub.add_parser("intents-status", help="read-only: approvals, stats, policy counters and vault balance")
-    sub.add_parser("intents-config", help="owner: set the wNEAR contract and the guardian (1 yocto; revokes approvals)").add_argument("--yes", action="store_true")
-    sub.add_parser("intents-routes", help="owner: set route 0 from LEASH_ROUTE_DEST_ASSET and LEASH_ROUTE_RECIPIENT (1 yocto)").add_argument("--yes", action="store_true")
+    keyp = sub.add_parser("intents-keys", help="add the guardian and agent function-call keys (plan only without --yes)")
+    keyp.add_argument("--yes", action="store_true")
+    for name, text in (("intents-config", "owner: set the wNEAR contract and the guardian (1 yocto; revokes approvals)"),
+                       ("intents-routes", "owner: set route 0 from LEASH_ROUTE_DEST_ASSET and LEASH_ROUTE_RECIPIENT (1 yocto)")):
+        owner = sub.add_parser(name, help=text)
+        owner.add_argument("--yes", action="store_true")
+        owner.add_argument("--confirm-vault", help="the vault name, required to send")
+    quote = sub.add_parser("intents-quote", help="guardian: one real quote, verified and saved in the private log (never paid)")
+    quote.add_argument("--route", type=int, default=0)
+    quote.add_argument("--amount", required=True, help="NEAR, for example 0.1")
+    quote.add_argument("--yes", action="store_true", help="confirm that this asks for a real quote")
     appr = sub.add_parser("intents-approve", help="guardian: one single-use approval (no deposit)")
     spend = sub.add_parser("intents-spend", help="agent: spend one approval with spend_intent")
     for sp in (appr, spend):
         sp.add_argument("--route", type=int, default=0)
-        sp.add_argument("--deposit-account", required=True)
+        sp.add_argument("--deposit-account", help="testnet only; outside testnet it comes from the saved quote")
         sp.add_argument("--amount", required=True, help="NEAR, for example 0.1")
         sp.add_argument("--yes", action="store_true", help="send; without it only the plan is printed")
-    appr.add_argument("--minutes", type=int, default=20, help=f"approval lifetime, 1 to {callpath.MAX_APPROVAL_MINUTES}")
-    appr.add_argument("--quote-hash", help="64 hex characters; testnet default is a fixed rehearsal hash")
+    appr.add_argument("--minutes", type=int, help=f"approval lifetime, 1 to {callpath.MAX_APPROVAL_MINUTES} (testnet default 20; elsewhere an upper bound)")
+    appr.add_argument("--quote-hash", help="testnet only (default: a fixed rehearsal hash); elsewhere the hash comes from the saved quote")
     sig = sub.add_parser("agent-signature", help="which signature kind does the gateway give a model's answer?")
     sig.add_argument("--model", action="append", default=[], help="model id (repeatable; default: the configured model and z-ai/glm-5.3)")
     args = parser.parse_args(argv)
@@ -231,7 +299,9 @@ def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, mod
         )
         return 1
     try:
-        if args.command in ("intents-status", "intents-config", "intents-routes", "intents-approve", "intents-spend"):
+        if args.command == "intents-quote":
+            return intents_quote(cfg, args, oneclick or OneClick.from_env(), runner)
+        if args.command in ("intents-status", "intents-keys", "intents-config", "intents-routes", "intents-approve", "intents-spend"):
             return intents_call(cfg, args, runner)
         if args.command == "intents-tokens":
             return intents_tokens(args.symbol, args.chain, oneclick or OneClick.from_env())

@@ -63,23 +63,29 @@ The probe never deposits. Never send funds to the address it prints. The storage
 
 ## Call path through the vault (written and unit-tested; not yet run on a chain)
 
-Each command builds one `near` call, checks the network guard first (mainnet needs `LEASH_ALLOW_MAINNET=1` in the process environment), prints the plan, and sends only with `YES=1`. Private values are scrubbed from every printed line.
+Each command builds one `near` call, checks the network guard first (mainnet needs `LEASH_ALLOW_MAINNET=1` in the process environment), prints the plan, and sends only with `YES=1` (any other value, including `YES=0`, only prints the plan). Private values are scrubbed from every printed line.
 
 ```
-make intents-config   YES=1                      # owner: set the wNEAR contract and the guardian (1 yocto; revokes approvals)
-make intents-routes   YES=1                      # owner: set route 0 from LEASH_ROUTE_DEST_ASSET and LEASH_ROUTE_RECIPIENT
-make intents-approve  DEPOSIT=<account> SWAP_AMOUNT=0.1 YES=1   # guardian key: one single-use approval, 20 minutes by default (1 to 29)
-make intents-spend    DEPOSIT=<account> SWAP_AMOUNT=0.1 YES=1   # agent key: spend_intent
-make intents-status                              # read-only: approvals, stats, policy counters, vault balance
+make intents-keys                                  # function-call keys for the guardian and the agent (plan; YES=1 sends)
+make intents-config  CONFIRM_VAULT=<vault> YES=1   # owner: set the wNEAR contract and the guardian (1 yocto; revokes approvals)
+make intents-routes  CONFIRM_VAULT=<vault> YES=1   # owner: set route 0 from LEASH_ROUTE_DEST_ASSET and LEASH_ROUTE_RECIPIENT
+make intents-quote   SWAP_AMOUNT=0.1 YES=1         # guardian: one real quote, verified and saved in the private log (mainnet only)
+make intents-approve SWAP_AMOUNT=0.1 YES=1         # guardian key: one single-use approval from the saved quote
+make intents-spend   SWAP_AMOUNT=0.1 YES=1         # agent key: spend_intent with the approved deposit account
+make intents-status                                # read-only: approvals, stats, policy counters, vault balance
 ```
 
-- `spend_intent` has its own gas setting, `LEASH_INTENT_GAS_TGAS`: default 150, refused below 120 or above 300. The 30 Tgas default stays for `spend`. The gas is printed before every call. The contract panics early below 120.
-- At the minimum gas price 1 Tgas costs 0.0001 NEAR (source: docs.near.org/protocol/gas, read 2026-11-02), so 150 Tgas reserves about 0.015 NEAR on the signer; the unused part is refunded. The real gas used is not measured yet.
-- Outside testnet, `intents-approve` needs `QUOTE_HASH` from the guardian's saved quote. On testnet, where 1Click has no testnet, a fixed rehearsal hash is used.
-- The gas numbers in the contract are placeholders until the rehearsal measures them.
+- **Owner commands** (`intents-config`, `intents-routes`) need the vault name typed (`CONFIRM_VAULT`) to send. The owner key stays on the owner's own machine; no command here creates or keeps it elsewhere.
+- **Outside testnet** the deposit account and the quote hash come only from the guardian's saved quote. `intents-approve` refuses a typed account or hash, a quote older than 30 minutes or past its deadline, a quote for another amount, a quote that was already approved, and more than 6 approvals in an hour. It reads the vault state again first and refuses a payment the vault would deny. The approval lasts until the earlier of the quote deadline and 29 minutes (the contract allows 30); the expiry is printed in UTC. `intents-spend` takes the deposit account from the last approval in the log and refuses a typed one. On testnet, where 1Click has no testnet, both take `DEPOSIT=<account>` and approve uses a fixed rehearsal hash.
+- **The plan** shows network, signer, method, gas, route, deposit account, amount in NEAR and the approval expiry, and the agent's caps and what is already used. The route recipient is never printed. If the caps cannot be read, nothing is sent outside testnet.
+- **The result line** says `ALLOWED: batch scheduled`, `DENIED: <reason>` or `FAILED: <message>` for `spend_intent`, and whether the expected event was seen for the other methods. It is not proof of a swap: the swap itself is shown by the wNEAR receipts and the vault balance. What the `near` CLI returns for a failed on-chain call is unverified.
+- **Keys.** `make intents-keys` adds a function-call key to the guardian account (receiver: the vault, method `approve_intent`, allowance 0.02 NEAR) and to the agent account (methods `spend` and `spend_intent`, allowance 0.08 NEAR, five calls at 150 Tgas), then reads every key of both accounts back from the RPC and prints its methods and allowance. A full-access key, a key without an allowance limit or any other difference is flagged. On mainnet it fails if one is found, and refuses to run if an owner key file is on the machine. The agent account needs about 0.10 NEAR for gas. The syntax of the `near account add-key` call and which key the CLI signs with when an account has several are unverified.
+- `spend_intent` has its own gas setting, `LEASH_INTENT_GAS_TGAS`: default 150, refused below 120 or above 300. The 30 Tgas default stays for `spend`. The contract panics early below 120.
+- At the minimum gas price 1 Tgas costs 0.0001 NEAR (source: docs.near.org/protocol/gas, read 2026-11-02), so 150 Tgas reserves about 0.015 NEAR on the signer; the unused part is refunded. The real gas used is not measured yet; the gas numbers in the contract are placeholders until the rehearsal measures them.
+- While `intents-routes` runs, the recipient is an argument of the `near` process and is visible in the process list of that machine. It is public on the chain through `get_routes` anyway; run owner commands only on a machine that only the owner uses.
+- The loss through a swap is bounded by the daily cap per fixed 24-hour window; across a window boundary, up to twice the daily cap.
 
 ## Not done in this release
 
-- No deposit and no real swap. 1Click gave no minimum in dry quotes down to 0.001 NEAR; a minimum may still apply at deposit time, which is untested.
-- The vault does not execute payments through Intents.
+- Executing a swap through the vault is implemented and unit-tested; no live swap has been done. 1Click gave no minimum in dry quotes down to 0.001 NEAR; a minimum may still apply at deposit time, which is untested.
 - The quote signature is not verified.

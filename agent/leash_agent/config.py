@@ -48,6 +48,10 @@ WNEAR = {"mainnet": "wrap.near", "testnet": "wrap.testnet"}
 INTENT_GAS_MIN_TGAS = 120
 INTENT_GAS_MAX_TGAS = 300
 INTENT_GAS_DEFAULT_TGAS = 150
+# Mirrors of contract constants, tied to contract/src/lib.rs by a test. All "to be measured" in the rehearsal.
+ACTION_GAS_TGAS = 10
+MIN_UNWRAP_GAS_TGAS = 30
+UNWRAP_ACTION_GAS_TGAS = 20
 
 
 def intent_gas_tgas(raw: str | None) -> int:

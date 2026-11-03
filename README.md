@@ -48,7 +48,7 @@ Measured on NEAR testnet. Every row has its evidence in [docs/testnet-proof.md](
 | Check | Result |
 |---|---|
 | Contract unit tests | 117 passed |
-| Agent unit tests | 238 passed |
+| Agent unit tests | 299 passed |
 | 1Click dry quotes against the live mainnet API, no funds, no LEASH contract on mainnet | 9 sizes from 0.5 to 0.001 NEAR passed the guardian's checks, see [docs/intents.md](docs/intents.md) |
 | Scripted testnet demo (`make demo-testnet`) | 12 checks passed, 0 failed |
 | Hijacked agent on a fresh policy, every request sent straight to the vault | 14 requests: 11 blocked by the vault, 3 paid to the allowlisted payee inside the caps (by design), 0 paid to a non-payee |
@@ -74,7 +74,7 @@ make test-agent   # agent tests
 make check        # format check, lint, contract and agent tests
 ```
 
-Expected: `make test` ends with `test result: ok. 117 passed`, and `make test-agent` prints `Ran 238 tests` followed by `OK`.
+Expected: `make test` ends with `test result: ok. 117 passed`, and `make test-agent` prints `Ran 299 tests` followed by `OK`.
 
 ### Testnet demo (optional, needs network)
 
@@ -114,7 +114,7 @@ Before it sends anything, the suite checks the vault (policy, pauses, allowlist,
 | Full-access key removal | `make lock-vault-testnet` deletes the vault's full-access keys, so no one can bypass the policy or replace the contract | Script ready, for the final vault |
 | NEP-297 style events | `EVENT_JSON:` logs with standard `leash` for every decision | Implemented |
 | NEAR AI Cloud | The agent's decisions, through its OpenAI-compatible API | Implemented |
-| NEAR Intents (1Click) | The guardian builds and checks dry quotes. No payment goes through the vault yet | Quotes implemented, payments planned |
+| NEAR Intents (1Click) | The guardian builds and checks quotes. Executing a swap through the vault is implemented and unit-tested; no live swap has been done | Quotes implemented and recorded; swap execution unit-tested |
 | Chain Signatures | Not used in this release | Roadmap |
 
 ## Contract interface

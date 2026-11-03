@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 source scripts/config.sh
 
 MOVED=()
-for id in "$VAULT" "$OWNER" "$AGENT" "$PAYEE" "$ATTACKER"; do
+for id in "$VAULT" "$OWNER" "$AGENT" "$GUARDIAN" "$PAYEE" "$ATTACKER"; do
   if summary="$(near account view-account-summary "$id" network-config "$NETWORK" now 2>&1)"; then
     echo "Exists, skipped: $id"
     continue
@@ -52,3 +52,4 @@ if [ "${#MOVED[@]}" -gt 0 ]; then
   printf '  %s\n' "${MOVED[@]}"
 fi
 echo "Done. Next: make deploy-testnet"
+echo "The guardian account is only used by the swap path (make intents-keys adds its function-call key)."
