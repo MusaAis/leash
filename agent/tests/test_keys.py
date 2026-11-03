@@ -24,8 +24,8 @@ def answer(*perms):
 
 
 GOOD = {
-    "g.testnet": answer(fc(str(2 * 10**22), ["approve_intent"])),
-    "a.testnet": answer(fc(str(8 * 10**22), ["spend", "spend_intent"])),
+    "g.testnet": answer(fc(str(7 * 10**22), ["approve_intent"])),
+    "a.testnet": answer(fc(str(31 * 10**22), ["spend", "spend_intent"])),
 }
 
 
@@ -57,24 +57,38 @@ class Keys(unittest.TestCase):
         self.assertEqual(value_after(args, "--contract-account-id"), "v.testnet")
         self.assertNotIn("--receiver-account-id", args)
         self.assertNotIn("--method-names", args)
-        self.assertEqual(value_after(args, "--allowance"), "0.02 NEAR")
+        self.assertEqual(value_after(args, "--allowance"), "0.07 NEAR")
         self.assertEqual(value_after(args, "sign-with-legacy-keychain"), "send")
+
+    def test_the_key_tail_never_leaves_a_question_for_the_cli(self):
+        args = keys.add_key_args(make_config(), "g.testnet", keys.GUARDIAN_METHODS, keys.GUARDIAN_ALLOWANCE)
+        i = args.index("autogenerate-new-keypair")
+        self.assertEqual(args[i + 1:i + 4], ["--signature-scheme", "ed25519", "save-to-legacy-keychain"])
+        self.assertEqual(args[-1], "send")
+
+    def test_near_never_reads_a_terminal(self):
+        from unittest import mock
+        from leash_agent import chain
+        done = mock.Mock(stdout="", stderr="", returncode=0)
+        with mock.patch.object(chain.subprocess, "run", return_value=done) as run:
+            chain.run_near(["near", "--version"])
+        self.assertIs(run.call_args.kwargs.get("stdin"), subprocess.DEVNULL)
 
     def test_the_agent_key_allows_exactly_spend_and_spend_intent(self):
         args = keys.add_key_args(make_config(), "a.testnet", keys.AGENT_METHODS, keys.AGENT_ALLOWANCE)
         self.assertEqual(value_after(args, "--function-names"), "spend,spend_intent")
-        self.assertEqual(value_after(args, "--allowance"), "0.08 NEAR")
+        self.assertEqual(value_after(args, "--allowance"), "0.31 NEAR")
 
-    def test_allowances_cover_five_agent_calls_and_six_guardian_calls(self):
-        price = 0.0001  # NEAR per Tgas at the minimum gas price
-        self.assertGreaterEqual(float(keys.AGENT_ALLOWANCE), 5 * 150 * price)
-        self.assertGreaterEqual(float(keys.GUARDIAN_ALLOWANCE), 6 * 30 * price)
+    def test_allowances_cover_two_calls_at_the_reserved_cost(self):
+        reserved = lambda tgas: 0.001 * tgas + 0.001  # NEAR, measured on testnet
+        self.assertGreaterEqual(float(keys.AGENT_ALLOWANCE), 2 * reserved(150))
+        self.assertGreaterEqual(float(keys.GUARDIAN_ALLOWANCE), 2 * reserved(30))
 
     def test_plan_only_sends_nothing_and_lists_every_key(self):
         code, run = self.run_keys(confirmed=False)
         text = "\n".join(self.lines)
         self.assertEqual((code, run.calls), (0, []))
-        for part in ("g.testnet: methods approve_intent, allowance 0.02 NEAR", "a.testnet: methods spend,spend_intent, allowance 0.08 NEAR", "plan only"):
+        for part in ("g.testnet: methods approve_intent, allowance 0.07 NEAR", "a.testnet: methods spend,spend_intent, allowance 0.31 NEAR", "plan only"):
             self.assertIn(part, text)
 
     def test_confirmed_adds_two_keys_and_never_signs_as_the_owner(self):
@@ -90,8 +104,8 @@ class Keys(unittest.TestCase):
     def test_every_key_is_printed_with_methods_and_allowance(self):
         self.run_keys()
         text = "\n".join(self.lines)
-        self.assertIn("g.testnet ed25519:K0: function call, receiver v.testnet, methods approve_intent, allowance 0.02 NEAR", text)
-        self.assertIn("methods spend,spend_intent, allowance 0.08 NEAR", text)
+        self.assertIn("g.testnet ed25519:K0: function call, receiver v.testnet, methods approve_intent, allowance 0.07 NEAR", text)
+        self.assertIn("methods spend,spend_intent, allowance 0.31 NEAR", text)
 
     def test_an_owner_key_file_stops_mainnet_and_is_only_noted_on_testnet(self):
         for network, owner in (("mainnet", "o.near"), ("testnet", "o.testnet")):
@@ -116,18 +130,18 @@ class Keys(unittest.TestCase):
 
     def test_full_access_unlimited_and_wrong_methods_are_flagged(self):
         cases = {
-            "full access": answer("FullAccess", fc(str(2 * 10**22), ["approve_intent"])),
+            "full access": answer("FullAccess", fc(str(7 * 10**22), ["approve_intent"])),
             "no allowance limit": answer(fc(None, ["approve_intent"])),
-            "allowance too high": answer(fc(str(3 * 10**22), ["approve_intent"])),
-            "extra method": answer(fc(str(2 * 10**22), ["approve_intent", "withdraw"])),
-            "other receiver": answer(fc(str(2 * 10**22), ["approve_intent"], receiver="x.testnet")),
+            "allowance too high": answer(fc(str(8 * 10**22), ["approve_intent"])),
+            "extra method": answer(fc(str(7 * 10**22), ["approve_intent", "withdraw"])),
+            "other receiver": answer(fc(str(7 * 10**22), ["approve_intent"], receiver="x.testnet")),
         }
         for name, reply in cases.items():
             lines, bad = keys.describe(reply, "g.testnet", "v.testnet", keys.GUARDIAN_METHODS, keys.GUARDIAN_ALLOWANCE)
             self.assertTrue(bad, name)
-        self.assertIn("FULL ACCESS", keys.describe(cases["full access"], "g.testnet", "v.testnet", ("approve_intent",), "0.02")[0][0])
-        self.assertIn("NO LIMIT", keys.describe(cases["no allowance limit"], "g.testnet", "v.testnet", ("approve_intent",), "0.02")[0][0])
-        self.assertFalse(keys.describe(GOOD["g.testnet"], "g.testnet", "v.testnet", ("approve_intent",), "0.02")[1])
+        self.assertIn("FULL ACCESS", keys.describe(cases["full access"], "g.testnet", "v.testnet", ("approve_intent",), "0.07")[0][0])
+        self.assertIn("NO LIMIT", keys.describe(cases["no allowance limit"], "g.testnet", "v.testnet", ("approve_intent",), "0.07")[0][0])
+        self.assertFalse(keys.describe(GOOD["g.testnet"], "g.testnet", "v.testnet", ("approve_intent",), "0.07")[1])
 
     def test_a_full_access_key_fails_on_mainnet_and_only_warns_on_testnet(self):
         bad = {"g.near": answer("FullAccess"), "a.near": answer("FullAccess")}
@@ -146,7 +160,7 @@ class Keys(unittest.TestCase):
     def test_plan_only_prints_the_keys_now_on_the_accounts_read_only(self):
         code, run = self.run_keys(confirmed=False)
         self.assertEqual((code, run.calls), (0, []))
-        self.assertIn("g.testnet ed25519:K0: function call, receiver v.testnet, methods approve_intent, allowance 0.02 NEAR", "\n".join(self.lines))
+        self.assertIn("g.testnet ed25519:K0: function call, receiver v.testnet, methods approve_intent, allowance 0.07 NEAR", "\n".join(self.lines))
 
     def test_plan_only_survives_an_unreadable_key_list(self):
         def broken(account, network):
@@ -158,8 +172,8 @@ class Keys(unittest.TestCase):
 
 MAIN_ENV = {"LEASH_ALLOW_MAINNET": "1"}
 MAIN_GOOD = {
-    "g.near": answer(fc(str(2 * 10**22), ["approve_intent"], receiver="v.near")),
-    "a.near": answer(fc(str(8 * 10**22), ["spend", "spend_intent"], receiver="v.near")),
+    "g.near": answer(fc(str(7 * 10**22), ["approve_intent"], receiver="v.near")),
+    "a.near": answer(fc(str(31 * 10**22), ["spend", "spend_intent"], receiver="v.near")),
 }
 
 
@@ -211,7 +225,7 @@ class MainnetVerify(unittest.TestCase):
     def test_a_full_access_key_file_on_the_machine_fails_even_if_the_key_is_listed(self):
         self.function_call_files()
         self.files.put("mainnet", "g.near", "ed25519:FULL")
-        answers = dict(MAIN_GOOD, **{"g.near": answer(fc(str(2 * 10**22), ["approve_intent"], receiver="v.near"), "FullAccess")})
+        answers = dict(MAIN_GOOD, **{"g.near": answer(fc(str(7 * 10**22), ["approve_intent"], receiver="v.near"), "FullAccess")})
         answers["g.near"]["result"]["keys"][1]["public_key"] = "ed25519:FULL"
         code, _ = self.verify(answers, env=dict(MAIN_ENV, LEASH_KNOWN_FULL_ACCESS_KEYS="ed25519:FULL"))
         self.assertEqual(code, 1)
@@ -219,7 +233,7 @@ class MainnetVerify(unittest.TestCase):
 
     def test_an_unlisted_full_access_key_on_the_chain_fails_and_a_listed_one_passes(self):
         self.function_call_files()
-        answers = dict(MAIN_GOOD, **{"a.near": answer(fc(str(8 * 10**22), ["spend", "spend_intent"], receiver="v.near"), "FullAccess")})
+        answers = dict(MAIN_GOOD, **{"a.near": answer(fc(str(31 * 10**22), ["spend", "spend_intent"], receiver="v.near"), "FullAccess")})
         answers["a.near"]["result"]["keys"][1]["public_key"] = "ed25519:OWNERDEVICE"
         code, _ = self.verify(answers)
         self.assertEqual(code, 1)
@@ -232,7 +246,7 @@ class MainnetVerify(unittest.TestCase):
 
     def test_a_key_listed_for_another_value_does_not_pass(self):
         self.function_call_files()
-        answers = dict(MAIN_GOOD, **{"a.near": answer(fc(str(8 * 10**22), ["spend", "spend_intent"], receiver="v.near"), "FullAccess")})
+        answers = dict(MAIN_GOOD, **{"a.near": answer(fc(str(31 * 10**22), ["spend", "spend_intent"], receiver="v.near"), "FullAccess")})
         answers["a.near"]["result"]["keys"][1]["public_key"] = "ed25519:OWNERDEVICE"
         for listed in ("", "ed25519:OTHER", "OWNERDEVICE", "ed25519:OWNERDEVICE2"):
             code, _ = self.verify(answers, env=dict(MAIN_ENV, LEASH_KNOWN_FULL_ACCESS_KEYS=listed))
@@ -246,9 +260,9 @@ class MainnetVerify(unittest.TestCase):
 
     def test_a_loose_allowance_or_wrong_methods_fail(self):
         self.function_call_files()
-        loose = dict(MAIN_GOOD, **{"g.near": answer(fc(str(5 * 10**22), ["approve_intent"], receiver="v.near"))})
+        loose = dict(MAIN_GOOD, **{"g.near": answer(fc(str(10 * 10**22), ["approve_intent"], receiver="v.near"))})
         self.assertEqual(self.verify(loose)[0], 1)
-        wrong = dict(MAIN_GOOD, **{"a.near": answer(fc(str(8 * 10**22), ["spend", "spend_intent", "withdraw"], receiver="v.near"))})
+        wrong = dict(MAIN_GOOD, **{"a.near": answer(fc(str(31 * 10**22), ["spend", "spend_intent", "withdraw"], receiver="v.near"))})
         self.assertEqual(self.verify(wrong)[0], 1)
 
     def test_secrets_in_key_files_are_never_printed(self):
@@ -270,8 +284,8 @@ class Aside(unittest.TestCase):
         self.cfg = make_config("testnet")
         # on the chain after the add: the creation key (full access) and the new function-call key
         self.answers = {
-            "g.testnet": answer("FullAccess", fc(str(2 * 10**22), ["approve_intent"])),
-            "a.testnet": answer("FullAccess", fc(str(8 * 10**22), ["spend", "spend_intent"])),
+            "g.testnet": answer("FullAccess", fc(str(7 * 10**22), ["approve_intent"])),
+            "a.testnet": answer("FullAccess", fc(str(31 * 10**22), ["spend", "spend_intent"])),
         }
         for account in self.answers:
             self.answers[account]["result"]["keys"][0]["public_key"] = "ed25519:CREATION"
@@ -286,11 +300,28 @@ class Aside(unittest.TestCase):
     def test_creation_key_files_move_aside_and_function_call_key_files_stay(self):
         self.assertEqual(self.run_aside(), 0)
         for account in self.answers:
-            kept = [public for _, public in keys.local_key_files(account, "testnet", self.home)]
-            self.assertEqual(kept, ["ed25519:K1"])
+            kept = {public for _, public in keys.local_key_files(account, "testnet", self.home)}
+            self.assertEqual(kept, {"ed25519:K1"})
             moved = self.home / ".near-credentials-aside" / "testnet" / account
             self.assertEqual([p.name for p in moved.iterdir()], ["CREATION.json"])
             self.assertEqual(oct(moved.stat().st_mode & 0o777), "0o700")
+
+    def test_the_function_call_key_file_is_linked_where_the_cli_looks(self):
+        self.run_aside()
+        for account in self.answers:
+            link = self.home / ".near-credentials" / "testnet" / f"{account}.json"
+            self.assertEqual(json.loads(link.read_text())["public_key"], "ed25519:K1")
+            self.assertEqual(oct(link.stat().st_mode & 0o777), "0o600")
+
+    def test_an_existing_account_file_is_never_overwritten(self):
+        link = self.home / ".near-credentials" / "testnet" / "g.testnet.json"
+        link.write_text("keep")
+        keys.link_account_file(self.cfg, {"g.testnet": self.answers["g.testnet"]}, self.home)
+        self.assertEqual(link.read_text(), "keep")
+
+    def test_nothing_is_linked_without_the_aside_flag(self):
+        self.run_aside(aside=False)
+        self.assertFalse((self.home / ".near-credentials" / "testnet" / "g.testnet.json").exists())
 
     def test_without_the_flag_nothing_moves(self):
         self.run_aside(aside=False)

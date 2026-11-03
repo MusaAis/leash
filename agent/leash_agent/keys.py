@@ -16,9 +16,10 @@ from .chain import ChainError, run_near
 from .config import Config
 from .redact import scrub
 
-# Allowance in NEAR: guardian 0.02 (6 calls at 30 Tgas), agent 0.08 (5 calls at 150 Tgas), both at 0.0001 NEAR per Tgas.
-GUARDIAN_METHODS, GUARDIAN_ALLOWANCE = ("approve_intent",), "0.02"
-AGENT_METHODS, AGENT_ALLOWANCE = ("spend", "spend_intent"), "0.08"
+# Allowance in NEAR. The node checks it against the reserved cost of a call, about 0.001 NEAR per prepaid Tgas plus 0.001 (measured on testnet).
+# Guardian: two calls at 30 Tgas. Agent: two calls at 150 Tgas.
+GUARDIAN_METHODS, GUARDIAN_ALLOWANCE = ("approve_intent",), "0.07"
+AGENT_METHODS, AGENT_ALLOWANCE = ("spend", "spend_intent"), "0.31"
 AGENT_FUNDING_MAINNET = "0.10"
 RPC_URLS = {"testnet": "https://test.rpc.fastnear.com", "mainnet": "https://free.rpc.fastnear.com"}  # docs.near.org/api/rpc/providers
 
@@ -26,13 +27,12 @@ RPC_URLS = {"testnet": "https://test.rpc.fastnear.com", "mainnet": "https://free
 def add_key_args(cfg: Config, account: str, methods: tuple[str, ...], allowance: str) -> list[str]:
     """One function-call key, receiver = the vault, signed by the account itself.
 
-    Flags are from `near account add-key ... grant-function-call-access --help` (shown, 2026-11-03). The words after
-    `autogenerate-new-keypair` are not yet shown by a --help output and are unverified until the rehearsal runs them.
+    The scheme is passed explicitly so the CLI has no question left to ask.
     """
     return [
         "near", "account", "add-key", account, "grant-function-call-access",
         "--allowance", f"{allowance} NEAR", "--contract-account-id", cfg.vault, "--function-names", ",".join(methods),
-        "autogenerate-new-keypair", "save-to-legacy-keychain", "network-config", cfg.network,
+        "autogenerate-new-keypair", "--signature-scheme", "ed25519", "save-to-legacy-keychain", "network-config", cfg.network,
         "sign-with-legacy-keychain", "send",
     ]
 
@@ -174,6 +174,22 @@ def move_aside(cfg: Config, answers: dict[str, object], home: Path) -> list[str]
     return lines
 
 
+def link_account_file(cfg: Config, answers: dict[str, object], home: Path) -> list[str]:
+    """After the creation key is moved aside, copy the one function-call key file to `<account>.json`, where the CLI looks first."""
+    lines = []
+    base = home / ".near-credentials" / cfg.network
+    for account in answers:
+        target = base / f"{account}.json"
+        chain = _on_chain(answers[account], account)
+        usable = [path for path, public in local_key_files(account, cfg.network, home) if chain.get(public) is False and path != target]
+        if target.exists() or len(usable) != 1:
+            continue
+        shutil.copyfile(usable[0], target)
+        os.chmod(target, 0o600)
+        lines.append(f"{account}: copied the function-call key file to {target.name} so the CLI finds it")
+    return lines
+
+
 def run(
     cfg: Config, *, confirmed: bool, runner: Callable[[list[str]], str] = run_near, env: Mapping[str, str] | None = None,
     out=print, fetch: Callable[[str, str], object] = fetch_keys, home: Path | None = None, aside: bool = False,
@@ -221,7 +237,7 @@ def run(
             out(line)
         problems = problems or bad
     if aside:
-        for line in move_aside(cfg, answers, home):
+        for line in move_aside(cfg, answers, home) + link_account_file(cfg, answers, home):
             out(line)
     if problems:
         out("A key is full access or not as planned. On testnet the creation key stays on the chain; use --aside to move its file off this machine.")
