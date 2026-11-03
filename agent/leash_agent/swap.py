@@ -9,7 +9,7 @@ import re
 
 from . import callpath
 from .callpath import CallPathError
-from .chain import Vault, near_to_yocto
+from .chain import ChainError, Vault, near_to_yocto, parse_call_output
 from .config import Config
 from .guardian import DEFAULT_MAX_PER_HOUR, GuardianLog, intent_denial
 from .intents import iso, parse_iso, utc_now
@@ -112,4 +112,59 @@ def prepare_spend(
                     "amount": str(amount), "deposit_address": deposit, "quote_hash": approval.get("quote_hash")})
     args = callpath.spend_intent_args(cfg, route_id, deposit, amount_near)
     extra = [f"deposit account comes from the last approved quote (hash {approval.get('quote_hash')}); approval expires {callpath.utc_text(expires_ns)}"]
+    earlier = [e for e in entries if e.get("event") == "spend_sent" and e.get("deposit_address") == deposit]
+    if earlier:
+        extra.append(f"WARNING: an earlier spend for this approval was sent at {earlier[-1].get('ts')}; run make intents-status before sending again "
+                     "(a retry is only right if that spend failed before it counted anything)")
     return args, extra
+
+
+# the vault's available balance around a spend (private log, mode 0600)
+def parse_balance(text: str) -> int | None:
+    """The yocto amount of a `get_available_balance` answer, or None if it cannot be read."""
+    try:
+        value = parse_call_output(text).returned
+        return int(str(value))
+    except (ChainError, ValueError, TypeError):
+        return None
+
+
+def read_balance(cfg: Config, runner) -> int | None:
+    try:
+        return parse_balance(runner(callpath._view(cfg, "get_available_balance")))
+    except ChainError:
+        return None
+
+
+def record_balance_before(
+    cfg: Config, log: GuardianLog, built: list[str], balance: int, now: datetime.datetime | None = None,
+) -> None:
+    data = callpath._payload_of(built)
+    log.append({"event": "spend_balance_before", "ts": (now or utc_now()).isoformat(), "agent": cfg.agent, "route_id": data.get("route_id"),
+                "amount": str(data.get("amount")), "deposit_address": data.get("deposit_account"), "balance": str(balance)})
+
+
+def _signed_near(delta: int) -> str:
+    return ("-" if delta < 0 else "+") + callpath.yocto_to_near(abs(delta))
+
+
+def balance_report(log: GuardianLog, cfg: Config, current: int | None) -> list[str]:
+    """The saved before-value of the last spend next to the current balance. Other transactions also change it."""
+    before = [e for e in log.entries() if e.get("event") == "spend_balance_before" and e.get("agent") == cfg.agent]
+    if not before:
+        return ["no saved balance from an earlier spend in the private log"]
+    last = before[-1]
+    try:
+        old = int(last["balance"])
+    except (KeyError, ValueError, TypeError):
+        return ["the saved balance entry is damaged; fix or move it"]
+    lines = [f"available balance before the last spend ({last.get('ts')}, amount {callpath.yocto_to_near(last.get('amount', 0))} NEAR): "
+             f"{callpath.yocto_to_near(old)} NEAR ({old} yocto)"]
+    if current is None:
+        return lines + ["available balance now: could not be read"]
+    delta = current - old
+    lines.append(f"available balance now: {callpath.yocto_to_near(current)} NEAR ({current} yocto)")
+    lines.append(f"difference: {_signed_near(delta)} NEAR ({delta} yocto)")
+    lines.append("difference is 0: the batch may still be running, or nothing moved; read again in a few seconds" if delta == 0 else
+                 "other transactions in between (funding, owner calls that change stored data, a refund) also change this number")
+    return lines

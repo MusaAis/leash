@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import urllib.error
 import urllib.request
 from decimal import Decimal
@@ -23,10 +24,14 @@ RPC_URLS = {"testnet": "https://test.rpc.fastnear.com", "mainnet": "https://free
 
 
 def add_key_args(cfg: Config, account: str, methods: tuple[str, ...], allowance: str) -> list[str]:
-    """One function-call key, receiver = the vault, signed by the account itself. Syntax unverified: see `near account add-key --help`."""
+    """One function-call key, receiver = the vault, signed by the account itself.
+
+    Flags are from `near account add-key ... grant-function-call-access --help` (shown, 2026-11-03). The words after
+    `autogenerate-new-keypair` are not yet shown by a --help output and are unverified until the rehearsal runs them.
+    """
     return [
         "near", "account", "add-key", account, "grant-function-call-access",
-        "--allowance", f"{allowance} NEAR", "--receiver-account-id", cfg.vault, "--method-names", ",".join(methods),
+        "--allowance", f"{allowance} NEAR", "--contract-account-id", cfg.vault, "--function-names", ",".join(methods),
         "autogenerate-new-keypair", "save-to-legacy-keychain", "network-config", cfg.network,
         "sign-with-legacy-keychain", "send",
     ]
@@ -56,8 +61,18 @@ def fetch_keys(account: str, network: str) -> object:
         raise ChainError(f"RPC request failed: {exc}") from exc
 
 
-def describe(answer: object, account: str, vault: str, methods: tuple[str, ...], allowance: str) -> tuple[list[str], bool]:
-    """One line per key with its methods and allowance. The flag is True if any key is full access or not as planned."""
+KNOWN_ENV = "LEASH_KNOWN_FULL_ACCESS_KEYS"  # public keys only (not secrets), comma separated
+
+
+def known_full_access(env: Mapping[str, str] | None) -> frozenset[str]:
+    raw = (os.environ if env is None else env).get(KNOWN_ENV, "")
+    return frozenset(item.strip() for item in raw.split(",") if item.strip())
+
+
+def describe(
+    answer: object, account: str, vault: str, methods: tuple[str, ...], allowance: str, known: frozenset[str] = frozenset(),
+) -> tuple[list[str], bool]:
+    """One line per key with its methods and allowance. The flag is True if any key is full access (and not listed in `known`) or not as planned."""
     try:
         keys = answer["result"]["keys"]  # type: ignore[index]
         rows = [(str(k["public_key"]), k["access_key"]["permission"]) for k in keys]
@@ -67,8 +82,9 @@ def describe(answer: object, account: str, vault: str, methods: tuple[str, ...],
     for public_key, permission in rows:
         call = permission.get("FunctionCall") if isinstance(permission, dict) else None
         if call is None:
-            lines.append(f"{account} {public_key}: FULL ACCESS")
-            bad = True
+            listed = public_key in known
+            lines.append(f"{account} {public_key}: FULL ACCESS" + (f" (listed in {KNOWN_ENV})" if listed else ""))
+            bad = bad or not listed
             continue
         raw_allowance = call.get("allowance")
         shown = "NO LIMIT" if raw_allowance is None else f"{yocto_to_near(raw_allowance)} NEAR"
@@ -81,41 +97,134 @@ def describe(answer: object, account: str, vault: str, methods: tuple[str, ...],
     return lines, bad
 
 
+def _on_chain(answer: object, account: str) -> dict[str, bool]:
+    """Public key -> True if the key is full access, as read from the RPC answer."""
+    try:
+        return {str(k["public_key"]): not (isinstance(k["access_key"]["permission"], dict) and "FunctionCall" in k["access_key"]["permission"])
+                for k in answer["result"]["keys"]}  # type: ignore[index]
+    except (KeyError, TypeError) as exc:
+        raise ChainError(f"unreadable key list for {account}: {exc!r}") from exc
+
+
+def local_key_files(account: str, network: str, home: Path) -> list[tuple[Path, str]]:
+    """Key files of `account` in the legacy keychain of this machine with their public key. The secret part is never read out."""
+    base = home / ".near-credentials" / network
+    paths = [base / f"{account}.json"] + (sorted((base / account).glob("*.json")) if (base / account).is_dir() else [])
+    found = []
+    for path in paths:
+        try:
+            public = json.loads(path.read_text()).get("public_key")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(public, str):
+            found.append((path, public))
+    return found
+
+
+def verify_local(cfg: Config, fetch: Callable[[str, str], object], home: Path, env: Mapping[str, str] | None, out) -> int:
+    """Mainnet, read-only: the server may hold function-call keys as planned and no full-access key. Exit 1 on any problem."""
+    known, problems = known_full_access(env), False
+    for account, methods, allowance in plan(cfg):
+        try:
+            answer = fetch(account, cfg.network)
+            lines, bad = describe(answer, account, cfg.vault, methods, allowance, known)
+            chain = _on_chain(answer, account)
+        except ChainError as exc:
+            raise CallPathError(f"{account}: key list could not be read: {exc}") from exc
+        for line in lines:
+            out(line)
+        problems = problems or bad
+        files = local_key_files(account, cfg.network, home)
+        usable = 0
+        for path, public in files:
+            if public not in chain:
+                out(f"{account}: key file {path.name} holds a key that is not on the account")
+            elif chain[public]:
+                out(f"{account}: FULL-ACCESS KEY FILE on this machine ({path.name}). The server must hold function-call keys only")
+                problems = True
+            else:
+                usable += 1
+        if usable == 0:
+            out(f"{account}: no function-call key file on this machine, so this machine cannot sign for it")
+            problems = True
+    out("PROBLEM: see above. Nothing was changed." if problems else "OK: this machine holds only function-call keys for the guardian and the agent, and no unknown full-access key is on either account.")
+    return 1 if problems else 0
+
+
+def move_aside(cfg: Config, answers: dict[str, object], home: Path) -> list[str]:
+    """Testnet: move key files whose key is full access on the chain into a folder beside the keychain. Never deletes."""
+    lines = []
+    for account in answers:
+        chain = _on_chain(answers[account], account)
+        files = local_key_files(account, cfg.network, home)
+        if not any(public in chain and not chain[public] for _, public in files):
+            lines.append(f"{account}: no function-call key file found on this machine, so nothing was moved aside")
+            continue
+        target = home / ".near-credentials-aside" / cfg.network / account
+        target.mkdir(parents=True, exist_ok=True)
+        os.chmod(target, 0o700)
+        for path, public in files:
+            if chain.get(public):
+                destination = target / path.name
+                n = 1
+                while destination.exists():
+                    destination, n = target / f"{path.name}.{n}", n + 1
+                shutil.move(str(path), str(destination))
+                lines.append(f"{account}: moved the full-access key file {path.name} to {target}")
+    return lines
+
+
 def run(
     cfg: Config, *, confirmed: bool, runner: Callable[[list[str]], str] = run_near, env: Mapping[str, str] | None = None,
-    out=print, fetch: Callable[[str, str], object] = fetch_keys, home: Path | None = None,
+    out=print, fetch: Callable[[str, str], object] = fetch_keys, home: Path | None = None, aside: bool = False,
 ) -> int:
-    """Plan, and with `confirmed` add the two keys, then print every key of both accounts read back from the RPC."""
+    """Testnet: plan, and with `confirmed` add the two keys. Mainnet: read-only verification. Then every key is read back."""
     guard_or_raise(cfg, [cfg.vault, cfg.owner, cfg.guardian, cfg.agent], env)
-    found = owner_key_files(cfg, home or Path.home())
+    home = home or Path.home()
+    found = owner_key_files(cfg, home)
     if found and cfg.network == "mainnet":
-        raise CallPathError("an owner key file is on this machine; the owner key belongs on the owner's laptop only. Nothing was changed")
+        raise CallPathError("an owner key file is on this machine; the owner key belongs on the owner's device only. Nothing was changed")
+    if cfg.network == "mainnet":
+        if confirmed or aside:
+            raise CallPathError("on mainnet this command only verifies: the function-call keys are created on the owner's device. Nothing was changed")
+        out("mainnet: read-only check of the guardian and agent keys. Nothing is added, moved or deleted.")
+        return verify_local(cfg, fetch, home, env, out)
     if found:
         out("note: testnet only: an owner key file is on this machine; on mainnet this command refuses to run")
     out(f"{cfg.network}: function-call keys, receiver {cfg.vault}. No owner key is created or kept by this command.")
     for account, methods, allowance in plan(cfg):
         out(f"  {account}: methods {','.join(methods)}, allowance {allowance} NEAR")
-    if cfg.network == "mainnet":
-        out(f"  the agent account must hold about {AGENT_FUNDING_MAINNET} NEAR for gas (fund it from the owner, on the owner's laptop)")
     if not confirmed:
-        out("plan only: nothing sent. Add --yes to send.")
+        out("plan only: nothing sent. Add --yes to send. The keys now on the accounts (read-only):")
+        for account, methods, allowance in plan(cfg):
+            try:
+                lines, _ = describe(fetch(account, cfg.network), account, cfg.vault, methods, allowance)
+            except ChainError as exc:
+                out(f"  {account}: key list could not be read: {exc}")
+                continue
+            for line in lines:
+                out(line)
         return 0
     for account, methods, allowance in plan(cfg):
         try:
             runner(add_key_args(cfg, account, methods, allowance))
         except ChainError as exc:
             raise CallPathError(scrub(f"adding the key for {account} failed: {exc}")) from exc
-    problems = False
+    problems, answers = False, {}
     for account, methods, allowance in plan(cfg):
         try:
-            lines, bad = describe(fetch(account, cfg.network), account, cfg.vault, methods, allowance)
+            answers[account] = fetch(account, cfg.network)
+            lines, bad = describe(answers[account], account, cfg.vault, methods, allowance)
         except ChainError as exc:
             raise CallPathError(f"keys were sent but {account} could not be read back: {exc}") from exc
         for line in lines:
             out(line)
         problems = problems or bad
+    if aside:
+        for line in move_aside(cfg, answers, home):
+            out(line)
     if problems:
-        out("A key is full access or not as planned. Remove it before this account is funded or used.")
-        return 1 if cfg.network == "mainnet" else 0
+        out("A key is full access or not as planned. On testnet the creation key stays on the chain; use --aside to move its file off this machine.")
+        return 0
     out("OK: only the planned function-call keys exist on both accounts.")
     return 0

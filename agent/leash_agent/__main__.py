@@ -166,19 +166,28 @@ def intents_call(cfg, args, runner) -> int:
     """The call path: owner config and routes, guardian approval, agent spend, read-only status."""
     cmd = args.command
     if cmd == "intents-status":
-        accounts = [cfg.vault, cfg.agent]
+        accounts, raw_answers = [cfg.vault, cfg.agent], {}
+
+        def tap(argv):  # keep the raw answer of each view, so the balance is read from the same call that is printed
+            raw_answers[argv[5]] = runner(argv)
+            return raw_answers[argv[5]]
+
         for name, argv in callpath.status_commands(cfg):
             try:
-                output = callpath.execute(cfg, argv, accounts, confirmed=True, runner=runner)
+                output = callpath.execute(cfg, argv, accounts, confirmed=True, runner=tap)
             except callpath.CallPathError as exc:
                 print(f"error: {exc}", file=sys.stderr)
                 return 1
             print(f"-- {name}\n{output}")
+        try:
+            print("-- balance around the last spend\n" + "\n".join(swap.balance_report(GuardianLog.from_env(), cfg, swap.parse_balance(raw_answers.get("get_available_balance", "")))))
+        except IntentsError as exc:
+            print(f"-- balance around the last spend\nnot shown: {scrub(str(exc))}")
         return 0
     extra = []
     try:
         if cmd == "intents-keys":
-            return keys.run(cfg, confirmed=args.yes, runner=runner)
+            return keys.run(cfg, confirmed=args.yes, runner=runner, aside=args.aside)
         if cmd == "intents-config":
             callpath.require_vault_name(cfg, args.confirm_vault, args.yes)
             built, accounts = callpath.set_intents_config_args(cfg), [cfg.vault, cfg.owner, cfg.guardian, cfg.wnear]
@@ -211,6 +220,15 @@ def intents_call(cfg, args, runner) -> int:
                 if args.deposit_account:
                     raise callpath.CallPathError("outside testnet the deposit account comes only from the last approved quote; do not pass one")
                 built, extra = swap.prepare_spend(cfg, GuardianLog.from_env(), args.route, args.amount, record=args.yes)
+        if cmd == "intents-spend" and args.yes:
+            balance = swap.read_balance(cfg, runner)
+            if balance is None and cfg.network != "testnet":
+                raise callpath.CallPathError("the vault balance could not be read, so nothing was sent")
+            if balance is None:
+                extra = [*extra, "note: the vault balance before the spend could not be read (testnet), so none is saved"]
+            else:
+                swap.record_balance_before(cfg, GuardianLog.from_env(), built, balance)
+                extra = [*extra, f"vault available balance before the spend, saved in the private log: {callpath.yocto_to_near(balance)} NEAR"]
         output = callpath.execute(cfg, built, accounts, confirmed=args.yes, runner=runner, extra=extra)
     except (callpath.CallPathError, IntentsError, ChainError, ValueError) as exc:
         print(f"error: {scrub(str(exc))}", file=sys.stderr)
@@ -251,8 +269,9 @@ def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, mod
     gd.add_argument("--network", required=True)
     gd.add_argument("accounts", nargs="+")
     sub.add_parser("intents-status", help="read-only: approvals, stats, policy counters and vault balance")
-    keyp = sub.add_parser("intents-keys", help="add the guardian and agent function-call keys (plan only without --yes)")
+    keyp = sub.add_parser("intents-keys", help="testnet: add the guardian and agent function-call keys (plan only without --yes); mainnet: read-only check")
     keyp.add_argument("--yes", action="store_true")
+    keyp.add_argument("--aside", action="store_true", help="testnet: after adding, move creation-key files off this machine (never deletes)")
     for name, text in (("intents-config", "owner: set the wNEAR contract and the guardian (1 yocto; revokes approvals)"),
                        ("intents-routes", "owner: set route 0 from LEASH_ROUTE_DEST_ASSET and LEASH_ROUTE_RECIPIENT (1 yocto)")):
         owner = sub.add_parser(name, help=text)

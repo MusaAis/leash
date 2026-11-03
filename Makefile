@@ -78,7 +78,7 @@ intents-status:
 	cd agent && python3 -m leash_agent intents-status
 
 intents-keys:
-	cd agent && python3 -m leash_agent intents-keys $(SEND)
+	cd agent && python3 -m leash_agent intents-keys $(SEND) $(if $(filter 1,$(ASIDE)),--aside)
 
 intents-config:
 	cd agent && python3 -m leash_agent intents-config $(if $(CONFIRM_VAULT),--confirm-vault $(CONFIRM_VAULT)) $(SEND)

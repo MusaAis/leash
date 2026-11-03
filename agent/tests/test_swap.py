@@ -352,5 +352,134 @@ class EndToEnd(Base):
         self.assertEqual([e["event"] for e in self.log.entries() if e["event"] in ("approval_sent", "spend_sent")], ["approval_sent", "spend_sent"])
 
 
+class OrderedChain(Chain):
+    """Checks, when a transaction is sent, that the balance entry is already in the private log."""
+
+    def __init__(self, log, **kw):
+        super().__init__(**kw)
+        self.log, self.saved_before_send = log, None
+
+    def __call__(self, args):
+        if "as-transaction" in args:
+            self.saved_before_send = [e for e in self.log.entries() if e.get("event") == "spend_balance_before"]
+        return super().__call__(args)
+
+
+class BalanceAroundSpend(Base):
+    def approved(self):
+        self.add({"event": "approval_sent", "ts": utc_now().isoformat(), "agent": self.cfg.agent, "route_id": 0, "amount": str(NEAR // 10),
+                  "deposit_address": HEX64, "quote_hash": "ab" * 32, "expires_ns": str((int(utc_now().timestamp()) + 600) * 10**9)})
+
+    def test_the_balance_is_saved_before_the_transaction_is_sent(self):
+        self.approved()
+        chain = OrderedChain(self.log, balance=7 * NEAR + 5)
+        code, out, err = self.run_main(["intents-spend", "--amount", "0.1", "--yes"], chain)
+        self.assertEqual(code, 0, err)
+        saved = chain.saved_before_send
+        self.assertEqual(len(saved), 1)
+        self.assertEqual((saved[0]["balance"], saved[0]["deposit_address"], saved[0]["amount"]), (str(7 * NEAR + 5), HEX64, str(NEAR // 10)))
+        self.assertIn("balance before the spend, saved in the private log: 7.000000000000000000000005 NEAR", out)
+        self.assertEqual(oct(self.log.path.stat().st_mode & 0o777), "0o600")
+
+    def test_a_plan_reads_and_saves_nothing(self):
+        self.approved()
+        chain = Chain()
+        code, _, err = self.run_main(["intents-spend", "--amount", "0.1"], chain)
+        self.assertEqual((code, chain.calls, self.events("spend_balance_before")), (0, [], []))
+        self.assertNotIn("get_available_balance", chain.views)
+
+    def test_an_unreadable_balance_stops_mainnet_and_is_noted_on_testnet(self):
+        self.approved()
+
+        class Blind(Chain):
+            def __call__(self, args):
+                if "as-read-only" in args and args[5] == "get_available_balance":
+                    return STDOUT_SENTINEL + "not json {"
+                return super().__call__(args)
+        chain = Blind()
+        code, _, err = self.run_main(["intents-spend", "--amount", "0.1", "--yes"], chain)
+        self.assertEqual((code, chain.calls), (1, []))
+        self.assertIn("balance could not be read", err)
+        self.cfg = make_config("testnet")
+        code, out, err = self.run_main(["intents-spend", "--amount", "0.1", "--deposit-account", HEX64, "--yes"], chain)
+        self.assertEqual((code, len(chain.calls)), (0, 1), err)
+        self.assertIn("could not be read (testnet)", out)
+        self.assertEqual(self.events("spend_balance_before"), [])
+
+    def test_testnet_saves_the_balance_too(self):
+        self.cfg = make_config("testnet")
+        chain = Chain(balance=3 * NEAR)
+        self.run_main(["intents-spend", "--amount", "0.1", "--deposit-account", HEX64, "--yes"], chain)
+        self.assertEqual([e["balance"] for e in self.events("spend_balance_before")], [str(3 * NEAR)])
+
+    def entry(self, balance, ts="2026-11-03T08:00:00+00:00"):
+        self.add({"event": "spend_balance_before", "ts": ts, "agent": self.cfg.agent, "route_id": 0, "amount": str(NEAR // 10),
+                  "deposit_address": HEX64, "balance": str(balance)})
+
+    def test_status_prints_before_now_and_the_difference(self):
+        self.entry(5 * NEAR)
+        code, out, _ = self.run_main(["intents-status"], Chain(balance=5 * NEAR - NEAR // 10 - 2_500_000_000_000_000_000_000))
+        self.assertEqual(code, 0)
+        for text in ("-- balance around the last spend", "5 NEAR (5000000000000000000000000 yocto)", "difference: -0.1025 NEAR",
+                     "(-102500000000000000000000 yocto)", "other transactions in between"):
+            self.assertIn(text, out)
+
+    def test_a_zero_difference_says_the_batch_may_still_be_running(self):
+        self.entry(5 * NEAR)
+        _, out, _ = self.run_main(["intents-status"], Chain(balance=5 * NEAR))
+        self.assertIn("difference: +0 NEAR (0 yocto)", out)
+        self.assertIn("the batch may still be running", out)
+
+    def test_status_uses_the_newest_entry_of_this_agent_only(self):
+        self.entry(1 * NEAR)
+        self.entry(2 * NEAR, ts="2026-11-03T09:00:00+00:00")
+        self.add({"event": "spend_balance_before", "ts": "x", "agent": "other.near", "balance": str(9 * NEAR)})
+        _, out, _ = self.run_main(["intents-status"], Chain(balance=2 * NEAR))
+        self.assertIn("2026-11-03T09:00:00", out)
+        self.assertNotIn("9000000000000000000000000", out)
+
+    def test_status_without_an_entry_or_with_a_damaged_one_or_an_unreadable_balance(self):
+        _, out, _ = self.run_main(["intents-status"], Chain())
+        self.assertIn("no saved balance", out)
+        self.add({"event": "spend_balance_before", "agent": self.cfg.agent, "balance": "abc"})
+        _, out, _ = self.run_main(["intents-status"], Chain())
+        self.assertIn("damaged", out)
+        self.log.path.unlink()
+        self.entry(NEAR)
+
+        class Blind(Chain):
+            def __call__(self, args):
+                return STDOUT_SENTINEL + "nope" if args[5] == "get_available_balance" else super().__call__(args)
+        _, out, _ = self.run_main(["intents-status"], Blind())
+        self.assertIn("available balance now: could not be read", out)
+
+    def test_a_damaged_log_does_not_break_the_status(self):
+        self.log.path.write_text("not json\n")
+        code, out, _ = self.run_main(["intents-status"], Chain())
+        self.assertEqual(code, 0)
+        self.assertIn("not shown", out)
+
+
+class RepeatedSpendWarning(Base):
+    def test_a_second_spend_for_the_same_approval_warns_but_is_not_refused(self):
+        self.add({"event": "approval_sent", "ts": self.now.isoformat(), "agent": self.cfg.agent, "route_id": 0, "amount": str(NEAR // 10),
+                  "deposit_address": HEX64, "quote_hash": "ab" * 32, "expires_ns": str(int(self.now.timestamp() * 1e6) * 1000 + 10 * 60 * 10**9)})
+        _, first = swap.prepare_spend(self.cfg, self.log, 0, "0.1", record=True, now=self.now)
+        self.assertFalse([line for line in first if "WARNING" in line])
+        args, second = swap.prepare_spend(self.cfg, self.log, 0, "0.1", record=True, now=self.now)
+        warning = [line for line in second if "WARNING" in line]
+        self.assertEqual(len(warning), 1)
+        for text in ("earlier spend for this approval", self.now.isoformat(), "make intents-status"):
+            self.assertIn(text, warning[0])
+        self.assertEqual(args[5], "spend_intent")
+
+    def test_a_spend_for_another_approval_does_not_warn(self):
+        self.add({"event": "spend_sent", "ts": "x", "agent": self.cfg.agent, "deposit_address": OTHER})
+        self.add({"event": "approval_sent", "ts": self.now.isoformat(), "agent": self.cfg.agent, "route_id": 0, "amount": str(NEAR // 10),
+                  "deposit_address": HEX64, "quote_hash": "ab" * 32, "expires_ns": str(int(self.now.timestamp() * 1e6) * 1000 + 10 * 60 * 10**9)})
+        _, extra = swap.prepare_spend(self.cfg, self.log, 0, "0.1", record=False, now=self.now)
+        self.assertFalse([line for line in extra if "WARNING" in line])
+
+
 if __name__ == "__main__":
     unittest.main()
