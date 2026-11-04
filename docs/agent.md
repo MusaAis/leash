@@ -67,7 +67,7 @@ During the run, every vault answer is compared with what the policy predicts, us
 
 The pay commands (`attack`, and `run` without `--dry-run`) refuse any network other than testnet unless `LEASH_ALLOW_NON_TESTNET=1` is set (exactly `1`; any other value refuses).
 
-`make guard NETWORK=mainnet ACCOUNTS="a.near b.near"` runs the shared account check from the repository root (mainnet also needs `LEASH_ALLOW_MAINNET=1` for that one command). It is not yet called by the scripts.
+`make guard NETWORK=mainnet ACCOUNTS="a.near b.near"` runs the shared account check from the repository root (mainnet also needs `LEASH_ALLOW_MAINNET=1` for that one command). Every call-path command that can send a transaction runs it first; the testnet shell scripts do not call it.
 
 ## How the model's answer is read
 

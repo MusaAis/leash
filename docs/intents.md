@@ -61,7 +61,7 @@ make wrap-storage             # read-only: wrap.near storage bounds and the stor
 
 The probe never deposits. Never send funds to the address it prints. The storage check sends no transaction and holds no key; it reads `LEASH_RPC_URL` (default: a public node from the NEAR docs list). Read on 2026-11-01: the storage deposit of `wrap.near` is 0.00125 NEAR (minimum and maximum are the same). The storage balance of both deposit addresses above was `null` (not registered), so a fresh deposit address is not registered there. The planned payment batch registers it first (design, untested).
 
-## Call path through the vault (written and unit-tested; not yet run on a chain)
+## Call path through the vault (unit-tested; run on testnet and once on mainnet, see [mainnet proof](mainnet-proof.md))
 
 Each command builds one `near` call, checks the network guard first (mainnet needs `LEASH_ALLOW_MAINNET=1` in the process environment), prints the plan, and sends only with `YES=1` (any other value, including `YES=0`, only prints the plan). Private values are scrubbed from every printed line.
 
@@ -91,6 +91,6 @@ make intents-status                                # read-only: approvals, stats
 
 ## Not done in this release
 
-- Executing a swap through the vault is implemented and unit-tested; no live swap has been done. 1Click gave no minimum in dry quotes down to 0.001 NEAR; a minimum may still apply at deposit time, which is untested.
+- One real swap through the vault has been done on mainnet (0.1 NEAR to USDC on Base, see [mainnet proof](mainnet-proof.md)). 1Click gave no minimum in dry quotes down to 0.001 NEAR and the 0.1 NEAR deposit went through (the USDC arrival is the owner's report); a minimum for smaller sizes at deposit time is untested.
 - The quote signature is not verified.
 - **Testnet run of the success case** (function-call keys only on the machine, creation-key files set aside): `approve_intent` and `spend_intent` for 0.1 NEAR to a rehearsal deposit account were both accepted, the vault emitted `intent_approved` and `intent_sent`, and `wrap.testnet` logged the deposit and the transfer. The counter grew by 0.1025 NEAR (amount plus both storage deposits). The vault's available balance fell by 0.09891 NEAR: 0.1 for the swap, 0.00125 for registering the deposit account (the vault was already registered and its deposit was refunded), minus 0.00234 of storage released when the approval was consumed. Transactions: `approve_intent` 4FKPhfKMmADoMkdCEUy43EurmbcSKCRVLCd3JfjDEh2s, `spend_intent` 344BekmvMeNuW8yA2yrEFyxT9WgRkQSBzNjXTRh4aj3F.

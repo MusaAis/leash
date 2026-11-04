@@ -1,6 +1,6 @@
 # ADR 0006: Guardian role
 
-**Status.** In progress (see ADR 0005).
+**Status.** Accepted for v0.3.1 (see ADR 0005).
 
 **Context.** Something must approve each swap deposit before the agent can send funds to it.
 

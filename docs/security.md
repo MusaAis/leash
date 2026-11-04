@@ -34,8 +34,8 @@ The agent account holds only gas money; funds stay in the vault. Model output is
 - The events `intent_sent` and `unwrapped` record the request, not the result: they are written before the batch runs. A failed batch leaves the event on the chain and the cap consumed. Evidence of a swap is the wNEAR receipts and the vault balance, never the event alone.
 - `spend_intent` counts the amount in the daily cap before the batch runs and does not roll it back. There is no settle callback: a failed swap deposit does not return the cap.
 - Changing the intents configuration (`set_intents_config`, even with the same values) revokes every pending approval. `set_routes` clears the approvals of that agent only; it does not change the configuration epoch.
-- The agent must attach enough gas for `spend_intent`; below the minimum it panics and nothing is counted. The gas numbers are placeholders until measured in a rehearsal.
-- Routes (asset and recipient) are recorded on the chain for the owner and the guardian to read. The vault never sees a swap's destination, so it cannot check that a quote pays the recorded recipient: that check is the guardian's. The contract is unit-tested; a live swap is pending (see [ADR 0005](adr/0005-intents-design-and-trust.md)).
+- The agent must attach enough gas for `spend_intent`; below the minimum it panics and nothing is counted. The 120 and 10 TGas constants are unchanged; one mainnet sample measured 9.853 Tgas for the whole path (see the mainnet proof).
+- Routes (asset and recipient) are recorded on the chain for the owner and the guardian to read. The vault never sees a swap's destination, so it cannot check that a quote pays the recorded recipient: that check is the guardian's. The contract is unit-tested, and one live swap went through it on mainnet (see the [mainnet proof](mainnet-proof.md) and [ADR 0005](adr/0005-intents-design-and-trust.md)).
 - Contract 0.2.0 changes the state layout and has no `migrate`: it is deployed fresh, never over an older vault.
 
 ## Exit path
