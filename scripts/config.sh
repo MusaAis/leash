@@ -7,6 +7,7 @@ PREFIX="${LEASH_PREFIX:-leashdemo}"
 VAULT="${PREFIX}-vault.${NETWORK}"
 OWNER="${PREFIX}-owner.${NETWORK}"
 AGENT="${PREFIX}-agent.${NETWORK}"
+GUARDIAN="${PREFIX}-guardian.${NETWORK}"
 PAYEE="${PREFIX}-payee.${NETWORK}"
 ATTACKER="${PREFIX}-attacker.${NETWORK}"
 GHOST="${PREFIX}-ghost.${NETWORK}"   # intentionally never created

@@ -1,10 +1,12 @@
-# LEASH
+<p align="center">
+  <img src="docs/assets/leash-wordmark.svg" alt="LEASH: Give AI money. Keep the leash." width="480">
+</p>
 
-**Give AI money. Keep the leash.**
-
-[![CI](https://github.com/MusaAis/leash/actions/workflows/ci.yml/badge.svg)](https://github.com/MusaAis/leash/actions/workflows/ci.yml)
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Network](https://img.shields.io/badge/network-NEAR%20testnet-informational)
+<p align="center">
+  <a href="https://github.com/MusaAis/leash/actions/workflows/ci.yml"><img src="https://github.com/MusaAis/leash/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
+  <img src="https://img.shields.io/badge/network-NEAR%20testnet-informational" alt="Network">
+</p>
 
 LEASH is an on-chain spending-control layer for AI agents on NEAR. The funds sit in a vault contract, and an agent can only ask the vault to pay. The vault enforces the owner's limits on-chain, so an agent that is tricked, buggy or hijacked cannot move money outside its policy. Built for NEAR HACKATHON.
 
@@ -41,13 +43,14 @@ Giving an AI agent a key means trusting it with everything that key controls. If
 
 ## Verified results
 
-Measured on NEAR testnet. Every row has its evidence in [docs/testnet-proof.md](docs/testnet-proof.md), and the latest run links every vault call to the explorer.
+Measured on NEAR testnet and, where a row says so, on mainnet. Every testnet row has its evidence in [docs/testnet-proof.md](docs/testnet-proof.md); the mainnet rows are in [docs/mainnet-proof.md](docs/mainnet-proof.md).
 
 | Check | Result |
 |---|---|
-| Contract unit tests | 40 passed |
-| Agent unit tests | 161 passed |
-| 1Click dry quotes on mainnet, no funds | 9 sizes from 0.5 to 0.001 NEAR passed the guardian's checks, see [docs/intents.md](docs/intents.md) |
+| Contract unit tests | 117 passed |
+| Agent unit tests | 350 passed |
+| 1Click dry quotes against the live mainnet API, no funds | 9 sizes from 0.5 to 0.001 NEAR passed the guardian's checks, see [docs/intents.md](docs/intents.md) |
+| Mainnet: one vault, one real swap through it (0.1 NEAR to USDC on Base) | The vault's batch succeeded on chain and the owner reports the USDC arrival; every transaction, the gas and the balances are in [docs/mainnet-proof.md](docs/mainnet-proof.md) |
 | Scripted testnet demo (`make demo-testnet`) | 12 checks passed, 0 failed |
 | Hijacked agent on a fresh policy, every request sent straight to the vault | 14 requests: 11 blocked by the vault, 3 paid to the allowlisted payee inside the caps (by design), 0 paid to a non-payee |
 | Live model, attack text only | Control task passed. 10 of 10 attacks refused by the agent, and 30 of 30 with three samples per attack at temperature 0.7 |
@@ -72,7 +75,7 @@ make test-agent   # agent tests
 make check        # format check, lint, contract and agent tests
 ```
 
-Expected: `make test` ends with `test result: ok. 40 passed`, and `make test-agent` prints `Ran 161 tests` followed by `OK`.
+Expected: `make test` ends with `test result: ok. 117 passed`, and `make test-agent` prints `Ran 350 tests` followed by `OK`.
 
 ### Testnet demo (optional, needs network)
 
@@ -112,8 +115,8 @@ Before it sends anything, the suite checks the vault (policy, pauses, allowlist,
 | Full-access key removal | `make lock-vault-testnet` deletes the vault's full-access keys, so no one can bypass the policy or replace the contract | Script ready, for the final vault |
 | NEP-297 style events | `EVENT_JSON:` logs with standard `leash` for every decision | Implemented |
 | NEAR AI Cloud | The agent's decisions, through its OpenAI-compatible API | Implemented |
-| NEAR Intents (1Click) | The guardian builds and checks dry quotes. No payment goes through the vault yet | Quotes implemented, payments planned |
-| Chain Signatures | Cross-chain payments behind the same vault | Planned |
+| NEAR Intents (1Click) | The guardian builds and checks quotes; the vault pays the deposit address through wNEAR. One swap of 0.1 NEAR to USDC on Base ran on mainnet | Implemented; one mainnet swap recorded (vault side shown on chain) |
+| Chain Signatures | Not used in this release | Roadmap |
 
 ## Contract interface
 
@@ -163,9 +166,10 @@ Makefile             short entry points for every command above
 | Event log and on-chain allow/deny counters | Implemented |
 | Testnet deployment and scripted demo | Done, see [proof](docs/testnet-proof.md) |
 | Agent runtime with NEAR AI Cloud decisions and attack suite | Implemented, tested on testnet |
-| Mainnet deployment | Planned |
+| Mainnet deployment | One vault deployed and used for one swap, see [proof](docs/mainnet-proof.md) |
 | 1Click dry quotes with a guardian check | Implemented, live dry quotes recorded in [docs/intents.md](docs/intents.md) |
-| Cross-chain payments through the vault, Arena, SDK | Planned |
+| Cross-chain payment through the vault | Done once on mainnet; the USDC arrival is the owner's report |
+| Arena, SDK | Planned |
 
 ## Documentation
 
@@ -175,6 +179,7 @@ Makefile             short entry points for every command above
 - [Security model](docs/security.md)
 - [NEAR Intents quotes](docs/intents.md)
 - [Testnet proof](docs/testnet-proof.md)
+- [Mainnet proof](docs/mainnet-proof.md)
 - [Architecture decisions](docs/adr)
 - [Changelog](CHANGELOG.md)
 

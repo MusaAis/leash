@@ -163,7 +163,7 @@ def run_near(args: list[str]) -> str:
     """Run the near CLI and return its combined output."""
     try:
         proc = subprocess.run(
-            args, capture_output=True, text=True, timeout=180, check=False
+            args, capture_output=True, text=True, timeout=180, check=False, stdin=subprocess.DEVNULL
         )
     except FileNotFoundError as exc:
         raise ChainError("near CLI not found. Install near-cli-rs.") from exc

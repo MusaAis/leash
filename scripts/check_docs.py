@@ -47,16 +47,20 @@ def numbers(doc: str, pattern: str) -> list[int]:
     return [int(m) for m in re.findall(pattern, text(doc))]
 
 
+VERSION_LINE = r"Version:\s*(v\d+\.\d+\.\d+(?:-fix\d+)?)([^\n]*)"
+CHANGELOG_TOP = r"^## \[(\d+\.\d+\.\d+(?:-fix\d+)?)\]"
+
+
 def check_versions() -> list[str]:
     problems = []
-    line = re.search(r"Version:\s*(v\d+\.\d+\.\d+)([^\n]*)", text("docs/STATE.md"))
+    line = re.search(VERSION_LINE, text("docs/STATE.md"))
     if not line:
         return ["docs/STATE.md has no `Version: vX.Y.Z` line"]
     version, rest = line.group(1), line.group(2)
     tags = subprocess.run(["git", "tag", "-l"], cwd=ROOT, capture_output=True, text=True).stdout.split()
     if version in tags and re.search(r"candidate|unreleased|in progress", rest, re.I):
         problems.append(f"STATE.md calls {version} a candidate, but the tag {version} exists")
-    top = re.search(r"^## \[(\d+\.\d+\.\d+)\]", text("CHANGELOG.md"), re.M)
+    top = re.search(CHANGELOG_TOP, text("CHANGELOG.md"), re.M)
     if not top or f"v{top.group(1)}" != version:
         problems.append(f"STATE.md says {version} but the newest released CHANGELOG entry is {top and top.group(1)}")
     return problems

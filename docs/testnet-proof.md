@@ -47,7 +47,7 @@ Counters after the run: 5 allowed, 5 denied. Spent in the daily window: 2.8 NEAR
 
 ## Run 3: live-model attack suite and hijacked-agent mode
 
-Agent runtime v0.2.1 against the contract at version 0.1.2 (unchanged). Vault `leashmusa2-vault.testnet` (the vault from Run 2), reset with `make policy-testnet`: the earlier policy was removed and set again, so the daily counter started at zero. Model `zai-org/GLM-5.1-FP8` through NEAR AI Cloud.
+Agent runtime v0.2.1 against the contract at version 0.1.2 (unchanged). Vault `leashmusa2-vault.testnet` (the vault from Run 2), reset with `make policy-testnet`: the earlier policy was removed and set again, so the daily counter started at zero. Requested model `zai-org/GLM-5.1-FP8` through NEAR AI Cloud (an alias on 2026-11-01; which model answered is not recorded, see the signature test in [agent.md](agent.md)).
 
 | Step | Action | Transaction |
 |---|---|---|
@@ -65,7 +65,7 @@ Cost: 17 model calls and 10,197 tokens. The suite prints outcomes, not transacti
 
 ## Run 4: live model and hijacked agent, with a link for every vault call
 
-Agent runtime v0.2.2 (strict model-answer parser, transaction id on every row) against the contract at version 0.1.2 (unchanged). Same vault as Run 3 (`leashmusa2-vault.testnet`), policy reset again with `make policy-testnet`. Model `zai-org/GLM-5.1-FP8`.
+Agent runtime v0.2.2 (strict model-answer parser, transaction id on every row) against the contract at version 0.1.2 (unchanged). Same vault as Run 3 (`leashmusa2-vault.testnet`), policy reset again with `make policy-testnet`. Requested model `zai-org/GLM-5.1-FP8` (an alias; which model answered is not recorded, see [agent.md](agent.md)).
 
 | Step | Action | Transaction |
 |---|---|---|
@@ -99,7 +99,7 @@ Cost: 17 model calls, 9,411 tokens. Transaction links are listed as printed by t
 
 ## Run 5: v0.2.3, hijacked agent and live model at temperature 0
 
-Agent runtime v0.2.3 against the contract at version 0.1.2 (unchanged). Fresh accounts with the prefix `leash3`: vault `leash3-vault.testnet`, owner `leash3-owner.testnet`, agent `leash3-agent.testnet`, payee `leash3-payee.testnet`. Policy: 1 NEAR per payment, 3 NEAR per day, one payee. Order of the run: deploy and policy, hijacked agent, a policy reset, then the live model (one sample, temperature 0, model `zai-org/GLM-5.1-FP8`).
+Agent runtime v0.2.3 against the contract at version 0.1.2 (unchanged). Fresh accounts with the prefix `leash3`: vault `leash3-vault.testnet`, owner `leash3-owner.testnet`, agent `leash3-agent.testnet`, payee `leash3-payee.testnet`. Policy: 1 NEAR per payment, 3 NEAR per day, one payee. Order of the run: deploy and policy, hijacked agent, a policy reset, then the live model (one sample, temperature 0, requested model `zai-org/GLM-5.1-FP8`, an alias; which model answered is not recorded, see [agent.md](agent.md)).
 
 | Step | Action | Transaction |
 |---|---|---|

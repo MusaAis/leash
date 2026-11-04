@@ -1,6 +1,6 @@
 SAMPLES ?= 1
 AMOUNT ?= 0.5
-.PHONY: test build fmt lint check check-docs test-agent agent-models agent-dry accounts-testnet deploy-testnet demo-testnet lock-vault-testnet policy-testnet agent-check agent-run attack-testnet attack-llm-testnet intents-tokens intents-dry
+.PHONY: test build fmt lint check check-docs test-agent agent-models agent-dry accounts-testnet deploy-testnet demo-testnet lock-vault-testnet policy-testnet agent-check agent-run attack-testnet attack-llm-testnet intents-tokens intents-dry intents-wet-probe wrap-storage agent-signature guard intents-status intents-config intents-routes intents-approve intents-spend intents-quote intents-keys
 
 test:
 	cd contract && cargo test
@@ -60,3 +60,53 @@ intents-tokens:
 
 intents-dry:
 	cd agent && python3 -m leash_agent intents-dry --amount $(AMOUNT)
+
+agent-signature:
+	cd agent && python3 -m leash_agent agent-signature $(foreach m,$(MODELS),--model $(m))
+
+wrap-storage:
+	cd agent && python3 -m leash_agent wrap-storage $(foreach a,$(ACCOUNT),--account $(a))
+
+intents-wet-probe:
+	cd agent && python3 -m leash_agent intents-wet-probe $(if $(PROBE_AMOUNT),--amount $(PROBE_AMOUNT)) --yes
+
+# The call path. It sends only with YES=1 (any other value, including YES=0 or "1 0", only prints the plan).
+# Owner commands also need CONFIRM_VAULT=<vault name>. Outside testnet the deposit account and the hash come from the saved quote.
+# Values typed on a command line reach the recipes through the environment and are quoted, so they are never read as shell code.
+export CONFIRM_VAULT DEPOSIT SWAP_AMOUNT MINUTES QUOTE_HASH ROUTE
+ROUTE ?= 0
+ifeq ($(strip $(YES)),1)
+SEND = --yes
+else
+SEND =
+endif
+ifeq ($(strip $(ASIDE)),1)
+ASIDE_FLAG = --aside
+else
+ASIDE_FLAG =
+endif
+intents-status:
+	cd agent && python3 -m leash_agent intents-status
+
+intents-keys:
+	cd agent && python3 -m leash_agent intents-keys $(SEND) $(ASIDE_FLAG)
+
+intents-config:
+	cd agent && python3 -m leash_agent intents-config $(if $(CONFIRM_VAULT),--confirm-vault "$$CONFIRM_VAULT") $(SEND)
+
+intents-routes:
+	cd agent && python3 -m leash_agent intents-routes $(if $(CONFIRM_VAULT),--confirm-vault "$$CONFIRM_VAULT") $(SEND)
+
+intents-quote:
+	cd agent && python3 -m leash_agent intents-quote --route "$$ROUTE" --amount "$$SWAP_AMOUNT" $(SEND)
+
+intents-approve:
+	cd agent && python3 -m leash_agent intents-approve --route "$$ROUTE" --amount "$$SWAP_AMOUNT" $(if $(DEPOSIT),--deposit-account "$$DEPOSIT") $(if $(MINUTES),--minutes "$$MINUTES") $(if $(QUOTE_HASH),--quote-hash "$$QUOTE_HASH") $(SEND)
+
+intents-spend:
+	cd agent && python3 -m leash_agent intents-spend --route "$$ROUTE" --amount "$$SWAP_AMOUNT" $(if $(DEPOSIT),--deposit-account "$$DEPOSIT") $(SEND)
+
+NETWORK ?= testnet
+export NETWORK ACCOUNTS
+guard:
+	cd agent && python3 -m leash_agent guard --network "$$NETWORK" $$ACCOUNTS

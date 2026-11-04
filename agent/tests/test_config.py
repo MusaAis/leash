@@ -52,6 +52,68 @@ class EnvFile(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("repeats a key", err.getvalue())
 
+    def test_leash_allow_keys_are_refused_in_the_file_and_no_value_is_shown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            for line in ("LEASH_ALLOW_MAINNET=yes-secret", "export LEASH_ALLOW_CUSTOM_AI_HOST=1"):
+                path.write_text(f"A=1\n{line}\n")
+                with self.assertRaises(EnvFileError) as ctx:
+                    load_env_file(path)
+                self.assertIn("line 2", str(ctx.exception))
+                self.assertIn("LEASH_ALLOW_", str(ctx.exception))
+                self.assertNotIn("secret", str(ctx.exception))
+
+    def test_export_lines_count_like_plain_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            path.write_text("NETWORK=testnet\nexport NETWORK=mainnet\n")
+            with self.assertRaises(EnvFileError) as ctx:
+                load_env_file(path)
+            self.assertIn("NETWORK on lines 1, 2", str(ctx.exception))
+            path.write_text("export LEASH_T_EXPORT=ok\n")
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("LEASH_T_EXPORT", None)
+                load_env_file(path)
+                self.assertEqual(os.environ["LEASH_T_EXPORT"], "ok")
+                os.environ.pop("LEASH_T_EXPORT", None)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OwnerOverride(unittest.TestCase):
+    IMPLICIT = "ab" * 32
+
+    def config(self, network, owner=None):
+        from leash_agent.config import Config
+        env = {"NETWORK": network, "LEASH_PREFIX": "leash"}
+        if owner is not None:
+            env["LEASH_OWNER"] = owner
+        with mock.patch.dict(os.environ, env, clear=False):
+            if owner is None:
+                os.environ.pop("LEASH_OWNER", None)
+            return Config.from_env()
+
+    def test_the_default_owner_follows_the_prefix_and_the_network(self):
+        self.assertEqual(self.config("mainnet").owner, "leash-owner.near")
+        self.assertEqual(self.config("testnet").owner, "leash-owner.testnet")
+
+    def test_an_implicit_owner_is_accepted_on_both_networks_and_the_others_keep_their_names(self):
+        for network, suffix in (("mainnet", "near"), ("testnet", "testnet")):
+            cfg = self.config(network, self.IMPLICIT)
+            self.assertEqual(cfg.owner, self.IMPLICIT)
+            self.assertEqual((cfg.vault, cfg.guardian, cfg.agent), (f"leash-vault.{suffix}", f"leash-guardian.{suffix}", f"leash-agent.{suffix}"))
+
+    def test_a_bad_owner_is_refused_without_echoing_it(self):
+        for bad in ("A.near", "x; echo PWNED", "a b", "-a.near", "a..near", "a", "ab" * 33):
+            with self.assertRaises(EnvFileError) as ctx:
+                self.config("mainnet", bad)
+            self.assertNotIn("PWNED", str(ctx.exception))
+
+    def test_the_mainnet_guard_accepts_an_implicit_owner(self):
+        from leash_agent.guard import check
+        check("mainnet", [self.IMPLICIT, "leash-vault.near"], {"LEASH_ALLOW_MAINNET": "1"})
+        with self.assertRaises(Exception):
+            check("mainnet", ["leash-owner.testnet"], {"LEASH_ALLOW_MAINNET": "1"})
+

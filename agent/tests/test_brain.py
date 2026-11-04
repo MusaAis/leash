@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from leash_agent import brain
 from leash_agent.brain import (
     Brain, BudgetStore, Decision, _http_post, check_ai_url, is_valid_account_id, missing_model_note,
     parse_decision, parse_models, usage_tokens, wrap_untrusted,
@@ -355,6 +356,20 @@ class NoRedirects(unittest.TestCase):
         self.assertEqual([path for path, _ in _Redirector.seen], ["/first"])  # /second was never requested
         # control: without a redirect the same helper works, so the test is not passing by accident
         self.assertEqual(_http_post(base + "/second", {"Authorization": "Bearer secret"}, {}), {"ok": True})
+
+
+class ReadCap(unittest.TestCase):
+    def test_an_oversized_answer_is_refused(self):
+        class Resp:
+            def __init__(self, size):
+                self.size = size
+
+            def read(self, limit):
+                return b"x" * min(self.size, limit)
+
+        self.assertEqual(brain._read_capped(Resp(10)), "x" * 10)
+        with self.assertRaises(RuntimeError):
+            brain._read_capped(Resp(brain.MAX_AI_RESPONSE_BYTES + 5))
 
 
 if __name__ == "__main__":

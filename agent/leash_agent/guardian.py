@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime
+import fcntl
 import json
 import os
 import time
@@ -13,10 +15,11 @@ from typing import Callable, Protocol
 from .chain import Snapshot
 from .intents import (
     DEFAULT_DEADLINE_MINUTES, DEFAULT_SLIPPAGE_BPS, TERMINAL, IntentsError, OneClick, QuoteRejected,
-    QuoteRequest, VerifiedQuote, build_quote_request, utc_now, verify_quote_response,
+    QuoteRequest, VerifiedQuote, build_quote_request, parse_iso, utc_now, verify_quote_response,
 )
 
 DEFAULT_MAX_PER_HOUR = 6
+MAX_CALLS_PER_MINUTE, MAX_CALLS_PER_HOUR = 10, 60  # every call to 1Click, whatever its result
 MAX_ROUTE_ID = 9  # the contract allows 10 routes per agent
 
 
@@ -54,6 +57,11 @@ class EnvRoutes:
         return self._route
 
 
+# Two wNEAR storage deposits per swap (0.00125 NEAR each); same value as the contract's INTENT_OVERHEAD.
+STORAGE_DEPOSIT = 1_250_000_000_000_000_000_000
+INTENT_OVERHEAD = 2 * STORAGE_DEPOSIT
+
+
 def intent_denial(snap: Snapshot, amount: int) -> str | None:
     """The reason the vault would deny `spend_intent`, in the contract's order, or None. (Allowlist: not used.)"""
     if snap.all_paused:
@@ -64,9 +72,9 @@ def intent_denial(snap: Snapshot, amount: int) -> str | None:
         return "zero_amount"
     if amount > snap.per_tx_cap:
         return "over_per_tx_cap"
-    if snap.spent + amount > snap.daily_cap:
+    if snap.spent + amount + INTENT_OVERHEAD > snap.daily_cap:
         return "over_daily_cap"
-    if amount > snap.balance:
+    if amount + INTENT_OVERHEAD > snap.balance:  # `balance` is the vault's available balance, already net of reserve
         return "insufficient_funds"
     return None
 
@@ -81,11 +89,28 @@ class GuardianLog:
     def from_env(cls) -> "GuardianLog":
         return cls(Path(os.environ.get("LEASH_GUARDIAN_LOG") or Path.home() / ".leash" / "guardian-log.jsonl"))
 
-    def append(self, entry: dict) -> None:
+    def _secure_dir(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.path.parent == Path.home() / ".leash":
+            os.chmod(self.path.parent, 0o700)
+
+    def append(self, entry: dict) -> None:
+        self._secure_dir()
         fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        os.fchmod(fd, 0o600)  # an older, wider file is tightened too
         with os.fdopen(fd, "a") as handle:
             handle.write(json.dumps(entry, sort_keys=True) + "\n")
+
+    @contextlib.contextmanager
+    def lock(self):
+        """One process at a time between a limit check and the entry it protects."""
+        self._secure_dir()
+        fd = os.open(f"{self.path}.lock", os.O_WRONLY | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)
 
     def entries(self) -> list[dict]:
         try:
@@ -142,7 +167,8 @@ class Guardian:
         req = build_quote_request(
             dest_asset=route.dest_asset, recipient=route.recipient, refund_to=refund_to or self.vault_account,
             amount=amount, dry=True, now=self._now(), deadline_minutes=self.deadline_minutes, slippage_bps=self.slippage_bps)
-        return self._ask(req)
+        with self.log.lock():
+            return self._ask(req)
 
     def quote(self, route_id: int, amount: int) -> Issued:
         """A real quote (`dry: false`): refuse early, ask 1Click, verify, log. One call per approval attempt."""
@@ -152,21 +178,44 @@ class Guardian:
             self.log.append({"event": "refused", "ts": self._now().isoformat(), "agent": self.agent,
                              "route_id": route_id, "amount": str(amount), "reason": reason})
             raise Refused(reason)
-        self._limits()
         req = build_quote_request(
             dest_asset=route.dest_asset, recipient=route.recipient, refund_to=self.vault_account,
             amount=amount, dry=False, now=self._now(), deadline_minutes=self.deadline_minutes, slippage_bps=self.slippage_bps)
-        issued = self._ask(req)
-        v = issued.verified
-        self.log.append({
-            "event": "quote_issued", "ts": self._now().isoformat(), "agent": self.agent, "route_id": route_id,
-            "amount": str(amount), "deposit_address": v.deposit_address, "deadline": v.deadline.isoformat() if v.deadline else None,
-            "signature": v.signature, "response": issued.response,
-        })
-        return issued
+        with self.log.lock():
+            self._limits()
+            issued = self._ask(req)
+            v = issued.verified
+            self.log.append({
+                "event": "quote_issued", "ts": self._now().isoformat(), "agent": self.agent, "route_id": route_id,
+                "amount": str(amount), "deposit_address": v.deposit_address,
+                "deadline": v.deadline.isoformat() if v.deadline else None, "request_deadline": req.body()["deadline"],
+                "echoed_deadline": issued.response.get("quoteRequest", {}).get("deadline"),
+                "signature": v.signature, "response": issued.response,
+            })
+            return issued
+
+    def _call_limit(self, entries: list[dict]) -> None:
+        now = self._now()
+        times = []
+        for entry in entries:
+            if entry.get("event") == "quote_call":
+                try:
+                    times.append(datetime.datetime.fromisoformat(str(entry["ts"])))
+                except (KeyError, ValueError) as exc:
+                    raise IntentsError("guardian log has an entry without a valid time; fix or move it") from exc
+        minute = sum(1 for t in times if now - t < datetime.timedelta(minutes=1))
+        hour = sum(1 for t in times if now - t < datetime.timedelta(hours=1))
+        if minute >= MAX_CALLS_PER_MINUTE or hour >= MAX_CALLS_PER_HOUR:
+            raise Refused(f"rate_limit: {minute} calls to 1Click in the last minute, {hour} in the last hour")
 
     def _ask(self, req: QuoteRequest) -> Issued:
-        response = self.oneclick.quote(req)
+        self._call_limit(self.log.entries())
+        self.log.append({"event": "quote_call", "ts": self._now().isoformat(), "agent": self.agent, "dry": req.dry})
+        try:
+            response = self.oneclick.quote(req)
+        except IntentsError as exc:
+            self.log.append({"event": "quote_failed", "ts": self._now().isoformat(), "agent": self.agent, "reason": str(exc)})
+            raise
         try:
             verified = verify_quote_response(req, response, now=self._now(), forbidden_deposit=self._forbidden())
         except QuoteRejected as exc:
@@ -193,7 +242,7 @@ class Guardian:
         finished = {e.get("deposit_address") for e in entries if e.get("event") == "final"}
         for entry in issued:
             try:
-                deadline = datetime.datetime.fromisoformat(str(entry["deadline"]))
+                deadline = parse_iso(entry.get("request_deadline") or entry["deadline"])
             except (KeyError, ValueError, TypeError) as exc:
                 raise IntentsError("guardian log has a quote without a valid deadline; fix or move it") from exc
             if entry.get("deposit_address") not in finished and deadline > now:

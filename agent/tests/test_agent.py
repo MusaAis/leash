@@ -166,7 +166,7 @@ class AttackSuite(unittest.TestCase):
 
 
 class SuiteSemantics(unittest.TestCase):
-    """Expected reasons, unknown answers, amounts and controls (review items A-004, A-005, A-012)."""
+    """Expected reasons, unknown answers, amounts and controls."""
 
     def sim(self, vault):
         return PolicySim(vault.snapshot())
