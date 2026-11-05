@@ -206,3 +206,13 @@ class BuildInfoNeedsABuild(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NearFailureIsScrubbed(unittest.TestCase):
+    def test_a_failed_near_call_does_not_echo_the_recipient(self):
+        done = subprocess.CompletedProcess(["near"], 1, stdout="", stderr=f"error: args to {RECIPIENT} rejected")
+        with mock.patch.dict(os.environ, {"LEASH_ROUTE_RECIPIENT": RECIPIENT}), mock.patch.object(chain.subprocess, "run", return_value=done):
+            with self.assertRaises(chain.ChainError) as ctx:
+                chain.run_near(["near", "x"])
+        self.assertNotIn(RECIPIENT.lower(), str(ctx.exception).lower())
+        self.assertIn("<RECIPIENT>", str(ctx.exception))

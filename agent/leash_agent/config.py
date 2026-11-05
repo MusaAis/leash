@@ -118,7 +118,7 @@ class Config:
             attacker=f"{prefix}-attacker.{suffix}",
             lookalike=f"{prefix}-paye3.{suffix}",
             ai_base_url=os.environ.get("NEAR_AI_BASE_URL", "https://cloud-api.near.ai/v1"),
-            ai_model=os.environ.get("NEAR_AI_MODEL", "zai-org/GLM-5.1-FP8"),
+            ai_model=os.environ.get("NEAR_AI_MODEL", "z-ai/glm-5.3-flash"),
             ai_api_key=os.environ.get("NEAR_AI_API_KEY") or None,
             guardian=f"{prefix}-guardian.{suffix}",
             wnear=os.environ.get("LEASH_WNEAR") or WNEAR.get(network, ""),

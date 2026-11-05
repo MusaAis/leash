@@ -11,12 +11,11 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-
-from .redact import scrub
 from typing import Callable
 
 from .chain import MAX_MEMO_BYTES, clean_text, is_valid_account_id, near_to_yocto  # noqa: F401
 from .config import Config
+from .redact import scrub
 
 SYSTEM_PROMPT = """You are a payments agent. You read a task and decide whether to pay.
 Reply with one JSON object and nothing else:
