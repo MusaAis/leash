@@ -7,7 +7,7 @@ from unittest import mock
 
 from leash_agent import __main__ as cli
 from leash_agent.chain import Snapshot
-from leash_agent.guardian import INTENT_OVERHEAD, EnvRoutes, Guardian, GuardianLog, Refused, intent_denial
+from leash_agent.guardian import INTENT_OVERHEAD, EnvRoutes, Guardian, GuardianLog, Refused, Route, StoredRoutes, intent_denial
 from leash_agent.intents import IntentsError, QuoteRejected, parse_iso
 from tests.test_chain import make_config
 from tests.test_intents import ASSET, DEPOSIT, NOW
@@ -347,6 +347,60 @@ class ConfigSuffix(unittest.TestCase):
         self.assertEqual((cfg.vault, cfg.agent, cfg.network), ("leashx-vault.near", "leashx-agent.near", "mainnet"))
         with mock.patch.dict("os.environ", {"LEASH_PREFIX": "leashx"}, clear=True), mock.patch("leash_agent.config.load_env_file"):
             self.assertEqual(Config.from_env().vault, "leashx-vault.testnet")
+
+
+
+class StoredRoutesTests(unittest.TestCase):
+    STORED = [{"dest_asset": ASSET, "recipient": "0xStored"}]
+
+    def reader(self, answer):
+        self.calls = []
+
+        def read(method, args):
+            self.calls.append((method, args))
+            return answer
+
+        return read
+
+    def test_it_returns_the_stored_route_and_reads_the_vault_once(self):
+        routes = StoredRoutes(self.reader(self.STORED))
+        self.assertEqual(routes.get("a.near", 0), Route(ASSET, "0xStored"))
+        routes.get("a.near", 0)
+        self.assertEqual(self.calls, [("get_routes", {"agent": "a.near"})])
+
+    def test_an_env_that_matches_or_is_empty_is_accepted(self):
+        for expect in (Route(ASSET, "0xStored"), Route("", ""), Route(ASSET, "")):
+            self.assertEqual(StoredRoutes(self.reader(self.STORED), expect).get("a.near", 0).recipient, "0xStored")
+
+    def test_a_mismatch_is_refused_and_the_message_hides_both_recipients(self):
+        for expect in (Route(ASSET, "0xOther"), Route("nep141:other.omft.near", "0xStored")):
+            with self.assertRaises(Refused) as ctx:
+                StoredRoutes(self.reader(self.STORED), expect).get("a.near", 0)
+            text = str(ctx.exception)
+            self.assertNotIn("0xStored", text)
+            self.assertNotIn("0xOther", text)
+
+    def test_a_missing_or_malformed_route_is_refused(self):
+        for answer, route_id in (([], 0), (self.STORED, 1), (self.STORED, -1), (None, 0), ("x", 0),
+                                 ([{"dest_asset": 1, "recipient": "r"}], 0), ([{"dest_asset": ASSET}], 0), (["x"], 0)):
+            with self.assertRaises(Refused, msg=(answer, route_id)):
+                StoredRoutes(self.reader(answer)).get("a.near", route_id)
+
+    def test_the_quote_uses_the_stored_recipient_and_a_mismatch_sends_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for expect, quotes in ((Route(ASSET, "0xStored"), 1), (Route(ASSET, "0xOther"), 0)):
+                oneclick = FakeOneClick()
+                guardian = Guardian(agent="a.near", vault_account="v.near", snapshot=lambda: snap(),
+                                    routes=StoredRoutes(self.reader(self.STORED), expect), oneclick=oneclick,
+                                    log=GuardianLog(Path(tmp) / f"g{quotes}.jsonl"), other_accounts=("owner.near", "guardian.near"),
+                                    now=Clock(), sleep=lambda s: None)
+                if quotes:
+                    guardian.quote(0, NEAR // 2)
+                    self.assertEqual(oneclick.quotes[0].body()["recipient"], "0xStored")
+                else:
+                    with self.assertRaises(Refused):
+                        guardian.quote(0, NEAR // 2)
+                self.assertEqual(len(oneclick.quotes), quotes)
 
 
 if __name__ == "__main__":

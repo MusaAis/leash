@@ -43,15 +43,18 @@ class FakeVault:
 class Chain:
     """A fake `near`: views answer from the fields, transactions are recorded in `calls`."""
 
-    def __init__(self, balance=5 * NEAR, paused=False, tx_output="ok"):
+    def __init__(self, balance=5 * NEAR, paused=False, tx_output="ok", routes=None):
         self.balance, self.paused, self.tx_output, self.calls, self.views = balance, paused, tx_output, [], []
+        self.routes = routes
 
     def __call__(self, args):
         if "as-read-only" in args:
             self.views.append(args[5])
+            from tests.test_intents import ASSET as route_asset
+            stored = self.routes if self.routes is not None else [{"dest_asset": route_asset, "recipient": RECIPIENT}]
             answer = {
                 "get_policy": {"per_tx_cap": str(NEAR // 2), "daily_cap": str(NEAR), "spent_in_window": "0", "allowlist": [], "paused": False},
-                "is_paused_all": self.paused, "get_available_balance": str(self.balance),
+                "is_paused_all": self.paused, "get_available_balance": str(self.balance), "get_routes": stored,
             }.get(args[5], [])
             return STDOUT_SENTINEL + json.dumps(answer)
         self.calls.append(args)
@@ -332,6 +335,36 @@ class Quote(Base):
             code, _, err = self.run_main(["intents-quote", "--amount", "0.1", "--yes"], chain, {"LEASH_ALLOW_MAINNET": "0"})
         self.assertEqual(code, 1)
         self.assertIn("LEASH_ALLOW_MAINNET", err)
+
+
+class QuoteReadsTheStoredRoute(Base):
+    def test_a_different_route_in_env_is_refused_before_any_quote(self):
+        from tests.test_guardian import FakeOneClick
+        from tests.test_intents import ASSET
+        self.cfg = make_config("mainnet")
+        oneclick = FakeOneClick()
+        chain = Chain(routes=[{"dest_asset": ASSET, "recipient": "0xSomeoneElse"}])
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ, {"LEASH_GUARDIAN_LOG": str(self.log.path), "LEASH_ALLOW_MAINNET": "1",
+                                          "LEASH_ROUTE_RECIPIENT": RECIPIENT, "LEASH_ROUTE_DEST_ASSET": ASSET}), redirect_stdout(out), redirect_stderr(err):
+            code = main(["intents-quote", "--amount", "0.1", "--yes"], cfg=self.cfg, runner=chain, oneclick=oneclick)
+        self.assertEqual((code, oneclick.quotes), (1, []))
+        self.assertIn("differs", err.getvalue())
+        self.assertNotIn(RECIPIENT, err.getvalue() + out.getvalue())
+        self.assertNotIn("0xSomeoneElse", err.getvalue() + out.getvalue())
+
+    def test_with_no_recipient_in_env_the_stored_route_is_used(self):
+        from tests.test_guardian import FakeOneClick
+        self.cfg = make_config("mainnet")
+        oneclick = FakeOneClick()
+        out, err = io.StringIO(), io.StringIO()
+        env = {"LEASH_GUARDIAN_LOG": str(self.log.path), "LEASH_ALLOW_MAINNET": "1"}
+        with mock.patch.dict(os.environ, env), redirect_stdout(out), redirect_stderr(err):
+            os.environ.pop("LEASH_ROUTE_RECIPIENT", None)
+            os.environ.pop("LEASH_ROUTE_DEST_ASSET", None)
+            code = main(["intents-quote", "--amount", "0.1", "--yes"], cfg=self.cfg, runner=Chain(), oneclick=oneclick)
+        self.assertEqual((code, len(oneclick.quotes)), (0, 1), err.getvalue())
+        self.assertEqual(oneclick.quotes[0].body()["recipient"], RECIPIENT)
 
 
 class EndToEnd(Base):

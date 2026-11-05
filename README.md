@@ -48,7 +48,7 @@ Measured on NEAR testnet and, where a row says so, on mainnet. Every testnet row
 | Check | Result |
 |---|---|
 | Contract unit tests | 117 passed |
-| Agent unit tests | 366 passed |
+| Agent unit tests | 373 passed |
 | 1Click dry quotes against the live mainnet API, no funds | 9 sizes from 0.5 to 0.001 NEAR passed the guardian's checks, see [docs/intents.md](docs/intents.md) |
 | Mainnet: one vault, one real swap through it (0.1 NEAR to USDC on Base) | The vault's batch succeeded on chain and the owner reports the USDC arrival; every transaction, the gas and the balances are in [docs/mainnet-proof.md](docs/mainnet-proof.md) |
 | Scripted testnet demo (`make demo-testnet`) | 12 checks passed, 0 failed |
@@ -75,7 +75,7 @@ make test-agent   # agent tests
 make check        # format check, lint, contract and agent tests
 ```
 
-Expected: `make test` ends with `test result: ok. 117 passed`, and `make test-agent` prints `Ran 366 tests` followed by `OK`.
+Expected: `make test` ends with `test result: ok. 117 passed`, and `make test-agent` prints `Ran 373 tests` followed by `OK`.
 
 ### Testnet demo (optional, needs network)
 

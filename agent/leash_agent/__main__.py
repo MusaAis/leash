@@ -16,7 +16,7 @@ from .chain import ChainError, Vault, near_to_yocto
 from .chain import run_near
 from .config import Config, EnvFileError
 from .guard import GuardError, check as guard_check
-from .guardian import EnvRoutes, Guardian, GuardianLog, Refused
+from .guardian import EnvRoutes, Guardian, GuardianLog, Refused, Route, StoredRoutes
 from .intents import IntentsError, OneClick, QuoteRejected, find_tokens, iso, utc_now
 from .preflight import PolicySim, precheck
 from .probe import address_kind, wet_probe
@@ -136,15 +136,11 @@ def intents_quote(cfg, args, oneclick, runner) -> int:
     if not args.yes:
         print("error: a real quote creates a deposit address (never pay it by hand). Add --yes.", file=sys.stderr)
         return 1
-    asset = os.environ.get("LEASH_ROUTE_DEST_ASSET", "")
-    if not asset:
-        found = find_tokens(oneclick.tokens(), "USDC", "base")
-        if len(found) != 1:
-            raise IntentsError(f"expected exactly one USDC on base in the live token list, found {len(found)}; set LEASH_ROUTE_DEST_ASSET")
-        asset = found[0]["assetId"]
-    routes = EnvRoutes.from_env(asset)
+    vault = Vault(cfg, runner=runner)
+    expect = Route(os.environ.get("LEASH_ROUTE_DEST_ASSET", ""), os.environ.get("LEASH_ROUTE_RECIPIENT", ""))
+    routes = StoredRoutes(vault.view, expect)  # the vault's route is the truth; .env may only confirm it
     guardian = Guardian(
-        agent=cfg.agent, vault_account=cfg.vault, snapshot=Vault(cfg, runner=runner).snapshot, routes=routes,
+        agent=cfg.agent, vault_account=cfg.vault, snapshot=vault.snapshot, routes=routes,
         oneclick=oneclick, log=GuardianLog.from_env(), other_accounts=(cfg.owner, cfg.guardian, cfg.wnear),
     )
     try:
@@ -152,7 +148,7 @@ def intents_quote(cfg, args, oneclick, runner) -> int:
     except QuoteRejected as exc:
         print(f"REJECTED by the guardian: {scrub(str(exc))}\n\nraw response (recipient hidden):\n{redact(exc.response, routes.get(cfg.agent, 0).recipient)}", file=sys.stderr)
         return 1
-    except (Refused, IntentsError) as exc:
+    except (Refused, IntentsError, ChainError) as exc:
         print(f"error: {scrub(str(exc))}", file=sys.stderr)
         return 1
     v = issued.verified
