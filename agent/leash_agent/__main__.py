@@ -325,6 +325,12 @@ def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, mod
             file=sys.stderr,
         )
         return 1
+    if pays and cfg.network != "testnet":
+        try:
+            guard_check(cfg.network, [cfg.vault, cfg.agent, cfg.payee])
+        except GuardError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
     try:
         if args.command == "intents-quote":
             return intents_quote(cfg, args, oneclick or OneClick.from_env(), runner)

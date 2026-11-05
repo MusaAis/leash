@@ -14,6 +14,7 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 # Public endpoints from https://docs.near.org/api/rpc/providers
@@ -40,9 +41,17 @@ def risky_keys(answer: object) -> list[str]:
     return found
 
 
+def rpc_url_ok(url: str) -> bool:
+    """https anywhere; plain http only for the loopback host itself (never a name that merely starts with it)."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme == "https":
+        return bool(parts.hostname)
+    return parts.scheme == "http" and parts.hostname in ("127.0.0.1", "localhost", "::1")
+
+
 def fetch(account: str, network: str) -> object:
     url = os.environ.get("LEASH_RPC_URL") or RPC_URLS.get(network, "")
-    if not url.startswith(("https://", "http://127.0.0.1", "http://localhost")):  # plain http: loopback only
+    if not rpc_url_ok(url):  # plain http: loopback only
         raise ValueError(f"no https RPC endpoint for network {network!r}; set LEASH_RPC_URL")
     body = json.dumps({
         "jsonrpc": "2.0", "id": "leash", "method": "query",

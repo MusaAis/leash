@@ -3,6 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/config.sh
+require_testnet deploy-testnet
 
 [ -f "$WASM" ] || { echo "Missing $WASM. Run: make build"; exit 1; }
 

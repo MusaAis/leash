@@ -8,6 +8,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/config.sh
+if [ "$NETWORK" != "testnet" ] && [ "${LEASH_ALLOW_MAINNET:-}" != "1" ]; then
+  echo "lock-vault outside testnet needs LEASH_ALLOW_MAINNET=1 for this one command (NETWORK=$NETWORK)." >&2
+  exit 1
+fi
 
 # Key lists come from the RPC as JSON (scripts/full_access_keys.py), not from CLI text.
 # Exit 2 from the helper means "could not verify": the script then stops, it never assumes success.

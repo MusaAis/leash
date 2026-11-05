@@ -104,8 +104,10 @@ class Config:
         root = Path(__file__).resolve().parents[2]
         load_env_file(root / ".env")
         network = os.environ.get("NETWORK", "testnet")
+        if network not in ACCOUNT_SUFFIX:
+            raise EnvFileError(f"unknown network {network!r}: only testnet and mainnet are known")
         prefix = os.environ.get("LEASH_PREFIX", "leashdemo")
-        suffix = ACCOUNT_SUFFIX.get(network, network)  # mainnet accounts end in .near, not .mainnet
+        suffix = ACCOUNT_SUFFIX[network]  # mainnet accounts end in .near, not .mainnet
         owner = owner_override(os.environ.get("LEASH_OWNER")) or f"{prefix}-owner.{suffix}"
         return cls(
             network=network,

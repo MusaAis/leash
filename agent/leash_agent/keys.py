@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import urllib.error
+import urllib.parse
 import urllib.request
 from decimal import Decimal
 from pathlib import Path
@@ -48,9 +49,17 @@ def owner_key_files(cfg: Config, home: Path) -> list[Path]:
     return [p for p in (base / f"{cfg.owner}.json", base / cfg.owner) if p.exists()]
 
 
+def rpc_url_ok(url: str) -> bool:
+    """https anywhere; plain http only for the loopback host itself (never a name that merely starts with it)."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme == "https":
+        return bool(parts.hostname)
+    return parts.scheme == "http" and parts.hostname in ("127.0.0.1", "localhost", "::1")
+
+
 def fetch_keys(account: str, network: str) -> object:
     url = os.environ.get("LEASH_RPC_URL") or RPC_URLS.get(network, "")
-    if not url.startswith(("https://", "http://127.0.0.1", "http://localhost")):
+    if not rpc_url_ok(url):
         raise ChainError(f"no https RPC endpoint for network {network!r}; set LEASH_RPC_URL")
     body = json.dumps({"jsonrpc": "2.0", "id": "leash", "method": "query",
                        "params": {"request_type": "view_access_key_list", "finality": "final", "account_id": account}}).encode()

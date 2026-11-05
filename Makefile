@@ -1,12 +1,17 @@
 SAMPLES ?= 1
 AMOUNT ?= 0.5
-.PHONY: test build fmt lint check check-docs test-agent agent-models agent-dry accounts-testnet deploy-testnet demo-testnet lock-vault-testnet policy-testnet agent-check agent-run attack-testnet attack-llm-testnet intents-tokens intents-dry intents-wet-probe wrap-storage agent-signature guard intents-status intents-config intents-routes intents-approve intents-spend intents-quote intents-keys
+# Values typed on a command line reach the recipes through the environment and are quoted there.
+export TASK AMOUNT SYMBOL CHAIN PROBE_AMOUNT SAMPLES MODELS ACCOUNT
+.PHONY: build-info test build fmt lint check check-docs test-agent agent-models agent-dry accounts-testnet deploy-testnet demo-testnet lock-vault-testnet policy-testnet agent-check agent-run attack-testnet attack-llm-testnet intents-tokens intents-dry intents-wet-probe wrap-storage agent-signature guard intents-status intents-config intents-routes intents-approve intents-spend intents-quote intents-keys
 
 test:
-	cd contract && cargo test
+	cd contract && cargo test --locked
 
 test-agent:
 	cd agent && python3 -m unittest discover -s tests -t .
+
+build-info:
+	scripts/build-info.sh
 
 build:
 	cd contract && cargo near build non-reproducible-wasm
@@ -15,7 +20,7 @@ fmt:
 	cd contract && cargo fmt
 
 lint:
-	cd contract && cargo fmt --check && cargo clippy --all-targets -- -D warnings
+	cd contract && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings
 
 check: lint test test-agent check-docs
 
@@ -44,31 +49,31 @@ agent-models:
 	cd agent && python3 -m leash_agent models
 
 agent-dry:
-	cd agent && python3 -m leash_agent run "$(TASK)" --dry-run
+	cd agent && python3 -m leash_agent run "$$TASK" --dry-run
 
 agent-run:
-	cd agent && python3 -m leash_agent run "$(TASK)"
+	cd agent && python3 -m leash_agent run "$$TASK"
 
 attack-testnet:
 	cd agent && python3 -m leash_agent attack --mode compromised
 
 attack-llm-testnet:
-	cd agent && python3 -m leash_agent attack --mode llm --samples $(SAMPLES)
+	cd agent && python3 -m leash_agent attack --mode llm --samples "$$SAMPLES"
 
 intents-tokens:
-	cd agent && python3 -m leash_agent intents-tokens $(if $(SYMBOL),--symbol $(SYMBOL)) $(if $(CHAIN),--chain $(CHAIN))
+	cd agent && python3 -m leash_agent intents-tokens $(if $(SYMBOL),--symbol "$$SYMBOL") $(if $(CHAIN),--chain "$$CHAIN")
 
 intents-dry:
-	cd agent && python3 -m leash_agent intents-dry --amount $(AMOUNT)
+	cd agent && python3 -m leash_agent intents-dry --amount "$$AMOUNT"
 
 agent-signature:
-	cd agent && python3 -m leash_agent agent-signature $(foreach m,$(MODELS),--model $(m))
+	cd agent && set -f && set -- && for m in $$MODELS; do set -- "$$@" --model "$$m"; done && python3 -m leash_agent agent-signature "$$@"
 
 wrap-storage:
-	cd agent && python3 -m leash_agent wrap-storage $(foreach a,$(ACCOUNT),--account $(a))
+	cd agent && set -f && set -- && for a in $$ACCOUNT; do set -- "$$@" --account "$$a"; done && python3 -m leash_agent wrap-storage "$$@"
 
 intents-wet-probe:
-	cd agent && python3 -m leash_agent intents-wet-probe $(if $(PROBE_AMOUNT),--amount $(PROBE_AMOUNT)) --yes
+	cd agent && python3 -m leash_agent intents-wet-probe $(if $(PROBE_AMOUNT),--amount "$$PROBE_AMOUNT") --yes
 
 # The call path. It sends only with YES=1 (any other value, including YES=0 or "1 0", only prints the plan).
 # Owner commands also need CONFIRM_VAULT=<vault name>. Outside testnet the deposit account and the hash come from the saved quote.
