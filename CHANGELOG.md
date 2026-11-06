@@ -103,7 +103,7 @@ All notable changes are listed here. Versions follow semantic versioning.
 ### Fixed
 - `make accounts-testnet` stops when it cannot tell whether an account exists, instead of moving key files of an account that does. It lists the files it moved aside. `LEASH_FORCE_CREATE=1` skips the check.
 - The `.env` loader no longer keeps an inline comment as part of a value; `.gitignore` covers `.env.*`, `*.pem` and saved reports.
-- Docs: the amount of the authorized payments was not compared, refused attempts have no transaction id, the owner's counter reset is documented, and the NEAR Builders credits sentence is replaced by the instructions link.
+- Docs: the amount of the authorized payments was not compared, refused attempts have no transaction id, the owner's counter reset is documented, and the credits sentence is replaced by the instructions link.
 - `docs/STATE.md` and the testnet proof still called v0.2.1 a candidate after its release.
 - README listed the denial reasons in an order that did not match the contract.
 
