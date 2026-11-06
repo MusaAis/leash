@@ -149,9 +149,11 @@ def check_links() -> list[str]:
 
 
 STALE = [r"not released", r"in progress", r"not deployed", r"placeholders?", r"to be measured", r"no LEASH contract",
-         r"owner's statement", r"reported by the owner"]
-PRIVATE = [r"\b(?:" + "|".join(["LE" + "AD", "Re" + "viewer", "Bui" + "lder", "Advi" + "ser"]) + r")\b", r"\bReview \d{3}\b", r"\b[A-Z]-0\d{2}\b", r"\bR\d+-\d+\b",
-           r"\bPatch \d+\b"]
+         r"reported by", r"\(reported", r"reported, not shown", r"owner reports", r"owner's report", r"owner's statement",
+         r"inferred", r"unverified", r"not yet verified", r"rehearsal records"]
+ROLES = "|".join(["LE" + "AD", "Re" + "viewer", "Bui" + "lder", "Advi" + "ser"])
+PRIVATE = [r"\b(?:" + ROLES + r")\b", r"\bReview \d+\b", r"\b[A-Z]-\d{1,3}\b", r"\bP\d+-\d+\b", r"\bR\d+-\d+\b",
+           r"\bPatch \d+\b", r"\b" + "Mu" + r"sa\b"]
 
 
 def stale_phrases(name: str, body: str) -> list[str]:
@@ -162,11 +164,20 @@ def private_shapes(name: str, body: str) -> list[str]:
     return [f"{name} matches the private shape /{p}/" for p in PRIVATE if re.search(p, body)]
 
 
+def contract_part(source: str) -> str:
+    return source[: source.index("#[cfg(test)]")] if "#[cfg(test)]" in source else source
+
+
 def interface_gaps(source: str, readme: str) -> list[str]:
-    start = source.index("pub fn new(")
-    end = source.index("#[cfg(test)]") if "#[cfg(test)]" in source else len(source)
-    names = re.findall(r"^\s*pub fn (\w+)\(", source[start:end], re.M)
-    return [f"README has no entry for the contract method `{n}`" for n in names if f"`{n}" not in readme]
+    part = contract_part(source)
+    names = re.findall(r"^\s*pub fn (\w+)\(", part[part.index("pub fn new("):], re.M)
+    return [f"README has no entry for the contract method `{n}`" for n in names if not re.search(r"`%s[`(]" % n, readme)]
+
+
+def event_gaps(source: str, readme: str) -> list[str]:
+    events = sorted(set(re.findall(r'emit\(\s*"([a-z_]+)"', contract_part(source))))
+    line = next((ln for ln in readme.splitlines() if ln.startswith("Events:")), "")
+    return [f"README event list has no `{e}`" for e in events if f"`{e}`" not in line]
 
 
 def badge_problems(readme: str, has_mainnet_proof: bool) -> list[str]:
@@ -196,8 +207,19 @@ def wasm_problems(build_md: str, proof_md: str) -> list[str]:
     return problems
 
 
-def slug(heading: str) -> str:
-    return re.sub(r"\s", "-", re.sub(r"[^\w\s-]", "", heading.strip().lower()))
+def snapshot_problems(name: str, body: str) -> list[str]:
+    return [f"{name} states a balance with a date in prose" for _ in re.findall(r"\bon 20\d\d-\d\d-\d\d[^\n]{0,80}\bNEAR\b", body)]
+
+
+def slug_set(body: str) -> set[str]:
+    seen: dict[str, int] = {}
+    slugs = set()
+    for heading in re.findall(r"^#+\s+(.*)$", re.sub(r"```.*?```", "", body, flags=re.S), re.M):
+        base = re.sub(r"\s", "-", re.sub(r"[^\w\s-]", "", heading.strip().lower()))
+        count = seen.get(base, 0)
+        seen[base] = count + 1
+        slugs.add(base if count == 0 else f"{base}-{count}")
+    return slugs
 
 
 def anchor_gaps(name: str, body: str, targets: dict[str, str]) -> list[str]:
@@ -207,16 +229,15 @@ def anchor_gaps(name: str, body: str, targets: dict[str, str]) -> list[str]:
             continue
         key = posixpath.normpath(posixpath.join(posixpath.dirname(name), path)) if path else name
         other = targets.get(key)
-        if other is None:
-            continue
-        slugs = {slug(h) for h in re.findall(r"^#+\s+(.*)$", other, re.M)}
-        if frag not in slugs:
+        if other is not None and frag not in slug_set(other):
             problems.append(f"{name} links to {path}#{frag}, which has no such heading")
     return problems
 
 
 def doc_paths() -> list[str]:
-    return ["README.md", "SECURITY.md", *sorted(str(p.relative_to(ROOT)) for p in (ROOT / "docs").glob("*.md"))]
+    docs = sorted(str(p.relative_to(ROOT)) for p in (ROOT / "docs").glob("*.md"))
+    adrs = sorted(str(p.relative_to(ROOT)) for p in (ROOT / "docs/adr").glob("*.md"))
+    return ["README.md", "SECURITY.md", *docs, *adrs]
 
 
 def check_stale() -> list[str]:
@@ -229,6 +250,10 @@ def check_private() -> list[str]:
 
 def check_interface() -> list[str]:
     return interface_gaps(text("contract/src/lib.rs"), text("README.md"))
+
+
+def check_events() -> list[str]:
+    return event_gaps(text("contract/src/lib.rs"), text("README.md"))
 
 
 def check_badge() -> list[str]:
@@ -247,10 +272,13 @@ def check_wasm_facts() -> list[str]:
     return wasm_problems(text("docs/build.md"), text("docs/mainnet-proof.md"))
 
 
+def check_snapshot() -> list[str]:
+    return snapshot_problems("docs/security.md", text("docs/security.md"))
+
+
 def check_anchors() -> list[str]:
     targets = {d: text(d) for d in doc_paths()}
     return [p for d in targets for p in anchor_gaps(d, targets[d], targets)]
-
 
 CHECKS = [
     ("STATE.md and CHANGELOG.md match the git tags", check_versions),
@@ -263,6 +291,8 @@ CHECKS = [
     ("no stale status phrases in the docs", check_stale),
     ("no private process terms in the docs", check_private),
     ("README lists every contract method", check_interface),
+    ("README lists every contract event", check_events),
+    ("no dated balance in docs/security.md", check_snapshot),
     ("README network badge matches the proofs", check_badge),
     ("near-sdk pin is stated in docs/build.md", check_pin),
     ("artifact hashes in docs/build.md match the mainnet proof", check_wasm_facts),

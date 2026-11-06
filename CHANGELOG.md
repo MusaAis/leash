@@ -8,7 +8,7 @@ All notable changes are listed here. Versions follow semantic versioning.
 - `make build-info` and `scripts/wasm_imports.py` print the toolchain versions, the size, the sha256 and the host imports of the wasm artifact; `docs/build.md` records them for `v0.3.1`.
 - `intents-quote` builds the quote from the route stored on the vault (`get_routes`); a value in `.env` can only confirm it, and a difference is refused.
 - Documentation index pages (`docs/README.md`, `docs/adr/README.md`) and a current mainnet state section in `docs/security.md`.
-- `scripts/check_docs.py` also checks stale phrases, private-process terms, the README interface table against the contract, the README badge, the `near-sdk` pin and the artifact facts in `docs/build.md`, and heading anchors in links. Each check has a unit test with a failing fixture.
+- `scripts/check_docs.py` also checks stale phrases, private-process terms, the README interface table and event list against the contract, dated balances in the security page, the README badge, the `near-sdk` pin and the artifact facts in `docs/build.md`, and heading anchors in links. Each check has a unit test with a failing fixture.
 
 ### Changed
 - The default model is `z-ai/glm-5.3-flash`: not an alias, with recorded signature kind `provider_tee`. LEASH records the signature kind and checks the hashes; it does not verify the signature.

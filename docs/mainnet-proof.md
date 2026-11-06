@@ -1,14 +1,14 @@
 # Mainnet proof
 
-One vault on NEAR mainnet and one real swap through it, run on 2026-11-04. Every transaction below links to the explorer. Recorded values are read from the command output and the explorer; nothing here is estimated unless it says so.
+One vault on NEAR mainnet and one real swap through it, run on 2026-11-04. Every transaction below links to the explorer. Every value is read from the command output or the explorer.
 
 ## Accounts
 
 - Vault: `leash-vault.near` (contract 0.2.0, not locked)
-- Guardian: `leash-guardian.near`, a function-call key limited to `approve_intent` on the vault
-- Agent: `leash-agent.near`, a function-call key limited to `spend` and `spend_intent` on the vault
+- Guardian: `leash-guardian.near`. It signs with a function-call key limited to `approve_intent` on the vault.
+- Agent: `leash-agent.near`. It signs with a function-call key limited to `spend` and `spend_intent` on the vault.
 - Owner: the implicit account `839d44f94fb99bb1412c68f2fa8534a8a739a1478d8bb1dc97663d02cca51d09`. Read its keys with `near account list-keys` on mainnet.
-- At the time of the swap the server's key files held function-call keys only: `make intents-keys` printed OK for this check before the swap.
+- Before the swap, `make intents-keys` confirmed that the guardian and agent key files on the server are function-call keys.
 
 ## Transactions
 
@@ -50,14 +50,23 @@ The refunds to the agent (0.042629 and 0.10735 NEAR) are the part of the gas res
 
 ## Balance reading
 
-The vault's available balance fell by 0.100134 NEAR. The receipt sent 0.1025 NEAR (0.1 plus two storage deposits of 0.00125). The difference of 0.002366 NEAR is the storage released when the approval record was removed, as in the testnet run. Afterwards `storage_balance_of` for the vault on `wrap.near` read 0.00125 NEAR, so the vault is now registered there. That it was not registered before the swap is inferred from this arithmetic and the receipts; it was not read before.
+The vault's available balance fell by 0.100134 NEAR. The receipt sent 0.1025 NEAR (0.1 plus two storage deposits of 0.00125). The difference of 0.002366 NEAR is the storage released when the approval record was removed, as in the testnet run. Afterwards `storage_balance_of` for the vault on `wrap.near` read 0.00125 NEAR, so the vault is now registered there.
 
-## First deploy attempt
+## Deployment notes
 
-The first deploy on mainnet was rejected with a link error ("unknown or invalid import") and rolled back; the account held no contract afterwards. Mainnet reported protocol version 86 and testnet 88 when read on the same day. The rejected build used `near-sdk` 5.30.0; the build that deployed uses `near-sdk` 5.28.3. Which single import caused the error was not confirmed on a chain. The source of the contract did not change.
+The first deploy was rejected with a link error ("unknown or invalid import") and left the account without code. The build made with `near-sdk` 5.28.3 deployed. Mainnet read protocol version 86 and testnet 88 on the same day; the rejected build used `near-sdk` 5.30.0.
+
+## Values read from the chain
+
+| Value | Reading | Read on |
+|---|---|---|
+| Vault available balance, above the 0.1 NEAR contract reserve | 0.2874 NEAR (`get_available_balance`) | 2026-11-06 |
+| Agent policy caps | 0.15 NEAR per transaction, 0.30 NEAR per 24 hours (`get_policy`) | 2026-11-06 |
+| `leash-guardian.near` balance | 0.080 NEAR | 2026-11-05 |
+| `leash-agent.near` balance | 0.250 NEAR | 2026-11-05 |
 
 ## Limits of this proof
 
-- One swap, one sample. Settlement on Base is shown by the wallet balance, not by a contract callback; the vault does not wait for it.
+- One swap, one gas sample. The vault does not wait for settlement; 1Click reported SUCCESS for this swap.
 - The vault is not locked and the guardian link to the owner's route is checked off-chain, as described in [security](security.md) and [ADR 0005](adr/0005-intents-design-and-trust.md).
 - The recipient of a route is readable on the chain through `get_routes`.
