@@ -11,6 +11,11 @@ SOURCE = (
     "impl V {\n    pub fn new(a: u8) {}\n    pub fn spend(&mut self) {}\n    pub fn spend_intent(&mut self) {\n"
     '        emit(\n            "spend_allowed",\n            x);\n        emit("spend_denied", y);\n    }\n}\n#[cfg(test)]\nmod t { pub fn helper() {} }\n'
 )
+REFACTORED = (
+    "fn check_spend(s: &S) -> Result<(), &'static str> {\n    if a {\n        return Err(\"all_paused\");\n    }\n"
+    "    if b {\n        return Err(\"zero_amount\");\n    }\n    Ok(())\n}\n\nfn other() -> Result<(), &'static str> {\n    Err(\"not_a_reason\")\n}\n"
+)
+VIEWS = SOURCE.replace("pub fn spend(&mut self) {}", "pub fn spend(&mut self) {}\n    pub fn would_spend(&self) {}")
 SHA = "a" * 64
 
 
@@ -84,6 +89,33 @@ class DocsChecks(unittest.TestCase):
         self.assertTrue(cd.anchor_gaps("b.md", "[x](a.md#nope)", target))
         self.assertTrue(cd.anchor_gaps("b.md", "[x](a.md#not-a-heading)", target))
         self.assertTrue(cd.anchor_gaps("a.md", "[x](#nope)", target))
+
+    def test_denial_reasons_come_from_the_shared_check(self):
+        self.assertEqual(cd.denial_reasons(REFACTORED), {"all_paused", "zero_amount"})
+        self.assertEqual(cd.denial_problems(REFACTORED, "Denial reasons: `all_paused`, `zero_amount`.\n"), [])
+        self.assertEqual(len(cd.denial_problems(REFACTORED, "Denial reasons: `all_paused`.\n")), 1)
+
+    def test_zero_denial_reasons_never_pass(self):
+        self.assertEqual(cd.denial_reasons("pub fn spend() {}\n"), set())
+        self.assertEqual(len(cd.denial_problems("pub fn spend() {}\n", "Denial reasons: \n")), 1)
+
+    def test_interface_skips_only_the_listed_names(self):
+        readme = "`new(a)` `spend(x)` `spend_intent(y)`"
+        self.assertEqual(cd.interface_gaps(VIEWS, readme, ["would_spend"]), [])
+        self.assertEqual(len(cd.interface_gaps(VIEWS, readme)), 1)
+
+    def test_unreleased_name_must_exist_and_stay_out_of_the_docs(self):
+        tags = {"v0.3.1"}
+        self.assertEqual(cd.unreleased_problems(VIEWS, {"README.md": "`spend(x)`"}, ["would_spend"], "v0.3.2", tags), [])
+        self.assertEqual(len(cd.unreleased_problems(VIEWS, {}, ["would_spend_old"], "v0.3.2", tags)), 1)
+        self.assertEqual(len(cd.unreleased_problems(VIEWS, {"README.md": "`would_spend(a)`"}, ["would_spend"], "v0.3.2", tags)), 1)
+        self.assertEqual(cd.unreleased_problems(VIEWS, {"README.md": "`would_spend_intent`"}, ["would_spend"], "v0.3.2", tags), [])
+
+    def test_unreleased_list_must_be_empty_once_the_tag_exists(self):
+        self.assertEqual(cd.unreleased_problems(VIEWS, {}, ["would_spend"], "v0.3.2", {"v0.3.1"}), [])
+        self.assertEqual(cd.unreleased_problems(VIEWS, {}, ["would_spend"], "v0.3.2", set()), [])
+        self.assertEqual(len(cd.unreleased_problems(VIEWS, {}, ["would_spend"], "v0.3.2", {"v0.3.1", "v0.3.2"})), 1)
+        self.assertEqual(cd.unreleased_problems(VIEWS, {}, [], "v0.3.2", {"v0.3.2"}), [])
 
 
 if __name__ == "__main__":

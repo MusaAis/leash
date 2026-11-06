@@ -86,15 +86,28 @@ def check_test_counts() -> list[str]:
     return problems
 
 
-def check_denial_reasons() -> list[str]:
-    source = text("contract/src/lib.rs")
-    body = source[source.index("pub fn spend"):source.index("match reason {")]
-    in_code = set(re.findall(r'Some\("([a-z_]+)"\)', body))
-    line = re.search(r"Denial reasons: ([^\n]+)", text("README.md"))
+def denial_reasons(source: str) -> set[str]:
+    start = source.find("fn check_spend(")
+    if start < 0:
+        return set()
+    end = source.find("\n}\n", start)
+    body = source[start:end if end >= 0 else len(source)]
+    return set(re.findall(r'Err\("([a-z_]+)"\)', body))
+
+
+def denial_problems(source: str, readme: str) -> list[str]:
+    in_code = denial_reasons(source)
+    if not in_code:
+        return ["no denial reasons found in the contract (expected `Err(\"reason\")` returns in fn check_spend)"]
+    line = re.search(r"Denial reasons: ([^\n]+)", readme)
     in_doc = set(re.findall(r"`([a-z_]+)`", line.group(1))) if line else set()
     if in_doc != in_code:
         return [f"README lists {sorted(in_doc)}, the contract has {sorted(in_code)}"]
     return []
+
+
+def check_denial_reasons() -> list[str]:
+    return denial_problems(text("contract/src/lib.rs"), text("README.md"))
 
 
 def check_attack_count() -> list[str]:
@@ -168,10 +181,32 @@ def contract_part(source: str) -> str:
     return source[: source.index("#[cfg(test)]")] if "#[cfg(test)]" in source else source
 
 
-def interface_gaps(source: str, readme: str) -> list[str]:
+# Methods in the contract that the docs must not name until the tag below exists.
+UNRELEASED_UNTIL = "v0.3.2"
+UNRELEASED_METHODS: list[str] = ["would_spend", "would_spend_intent"]
+
+
+def contract_methods(source: str) -> list[str]:
     part = contract_part(source)
-    names = re.findall(r"^\s*pub fn (\w+)\(", part[part.index("pub fn new("):], re.M)
+    return re.findall(r"^\s*pub fn (\w+)\(", part[part.index("pub fn new("):], re.M)
+
+
+def interface_gaps(source: str, readme: str, skip: tuple[str, ...] | list[str] = ()) -> list[str]:
+    names = [n for n in contract_methods(source) if n not in skip]
     return [f"README has no entry for the contract method `{n}`" for n in names if not re.search(r"`%s[`(]" % n, readme)]
+
+
+def unreleased_problems(source: str, docs: dict[str, str], listed: list[str], until: str, tags: set[str]) -> list[str]:
+    methods = set(contract_methods(source))
+    problems = []
+    for name in listed:
+        if name not in methods:
+            problems.append(f"`{name}` is on the unreleased list but the contract has no such method")
+        problems += [f"{path} names `{name}` before {until} is tagged"
+                     for path, body in docs.items() if re.search(r"\b%s\b" % re.escape(name), body)]
+    if listed and tags and until in tags:
+        problems.append(f"{until} is tagged: empty the unreleased list and add the README entries")
+    return problems
 
 
 def event_gaps(source: str, readme: str) -> list[str]:
@@ -253,7 +288,13 @@ def check_private() -> list[str]:
 
 
 def check_interface() -> list[str]:
-    return interface_gaps(text("contract/src/lib.rs"), text("README.md"))
+    return interface_gaps(text("contract/src/lib.rs"), text("README.md"), UNRELEASED_METHODS)
+
+
+def check_unreleased() -> list[str]:
+    tags = set(subprocess.run(["git", "tag", "-l"], cwd=ROOT, capture_output=True, text=True).stdout.split())
+    docs = {d: text(d) for d in doc_paths()}
+    return unreleased_problems(text("contract/src/lib.rs"), docs, UNRELEASED_METHODS, UNRELEASED_UNTIL, tags)
 
 
 def check_events() -> list[str]:
@@ -295,6 +336,7 @@ CHECKS = [
     ("no stale status phrases in the docs", check_stale),
     ("no private process terms in the docs", check_private),
     ("README lists every contract method", check_interface),
+    ("unreleased methods stay out of the docs until their tag", check_unreleased),
     ("README lists every contract event", check_events),
     ("no dated balance in docs/security.md", check_snapshot),
     ("README network badge matches the proofs", check_badge),
