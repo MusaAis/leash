@@ -117,6 +117,15 @@ class DocsChecks(unittest.TestCase):
         self.assertEqual(len(cd.unreleased_problems(VIEWS, {}, ["would_spend"], "v0.3.2", {"v0.3.1", "v0.3.2"})), 1)
         self.assertEqual(cd.unreleased_problems(VIEWS, {}, [], "v0.3.2", {"v0.3.2"}), [])
 
+    def test_readme_pin_row(self):
+        cargo = 'near-sdk = "=5.28.3"\n[dev-dependencies]\nnear-sdk = { version = "=5.28.3", features = ["x"] }\n'
+        tool = '[toolchain]\nchannel = "1.96.0"\n'
+        row = "| Pinned build inputs | Rust 1.96.0 and near-sdk =5.28.3, see docs |"
+        self.assertEqual(cd.readme_pin_problems(row, cargo, tool), [])
+        self.assertEqual(len(cd.readme_pin_problems("no row", cargo, tool)), 1)
+        self.assertEqual(len(cd.readme_pin_problems(row.replace("1.96.0", "1.95.0"), cargo, tool)), 1)
+        self.assertEqual(len(cd.readme_pin_problems(row.replace("5.28.3", "5.30.0"), cargo, tool)), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

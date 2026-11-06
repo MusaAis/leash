@@ -305,6 +305,24 @@ def check_badge() -> list[str]:
     return badge_problems(text("README.md"), (ROOT / "docs/mainnet-proof.md").exists())
 
 
+def readme_pin_problems(readme: str, cargo_toml: str, toolchain_toml: str) -> list[str]:
+    row = re.search(r"Rust (\d+\.\d+\.\d+) and near-sdk =(\d+\.\d+\.\d+)", readme)
+    if not row:
+        return ["README has no row `Rust X.Y.Z and near-sdk =X.Y.Z` for the pinned build inputs"]
+    channel = re.search(r'channel\s*=\s*"([^"]+)"', toolchain_toml)
+    pins = set(re.findall(r'near-sdk[^\n]*"=(\d+\.\d+\.\d+)"', cargo_toml))
+    problems = []
+    if not channel or channel.group(1) != row.group(1):
+        problems.append(f"README says Rust {row.group(1)}, rust-toolchain.toml has {channel and channel.group(1)}")
+    if pins != {row.group(2)}:
+        problems.append(f"README says near-sdk ={row.group(2)}, Cargo.toml pins {sorted(pins)}")
+    return problems
+
+
+def check_readme_pin() -> list[str]:
+    return readme_pin_problems(text("README.md"), text("contract/Cargo.toml"), text("contract/rust-toolchain.toml"))
+
+
 def check_pin() -> list[str]:
     if not (ROOT / "docs/build.md").exists():
         return ["docs/build.md is missing"]
@@ -341,6 +359,7 @@ CHECKS = [
     ("no dated balance in docs/security.md", check_snapshot),
     ("README network badge matches the proofs", check_badge),
     ("near-sdk pin is stated in docs/build.md", check_pin),
+    ("README pinned build inputs match the toolchain files", check_readme_pin),
     ("artifact hashes in docs/build.md match the mainnet proof", check_wasm_facts),
     ("heading anchors in links exist", check_anchors),
 ]

@@ -134,7 +134,7 @@ def local_key_files(account: str, network: str, home: Path) -> list[tuple[Path, 
 
 
 def verify_local(cfg: Config, fetch: Callable[[str, str], object], home: Path, env: Mapping[str, str] | None, out) -> int:
-    """Mainnet, read-only: the server may hold function-call keys as planned and no full-access key. Exit 1 on any problem."""
+    """Mainnet, read-only: this machine may hold function-call keys and no full-access key. Exit 1 on any problem."""
     known, problems = known_full_access(env), False
     for account, methods, allowance in plan(cfg):
         try:
@@ -152,7 +152,7 @@ def verify_local(cfg: Config, fetch: Callable[[str, str], object], home: Path, e
             if public not in chain:
                 out(f"{account}: key file {path.name} holds a key that is not on the account")
             elif chain[public]:
-                out(f"{account}: FULL-ACCESS KEY FILE on this machine ({path.name}). The server must hold function-call keys only")
+                out(f"{account}: FULL-ACCESS KEY FILE on this machine ({path.name}). Only function-call keys belong here")
                 problems = True
             else:
                 usable += 1

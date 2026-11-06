@@ -8,7 +8,7 @@ One vault on NEAR mainnet and one real swap through it, run on 2026-11-04. Every
 - Guardian: `leash-guardian.near`. It signs with a function-call key limited to `approve_intent` on the vault.
 - Agent: `leash-agent.near`. It signs with a function-call key limited to `spend` and `spend_intent` on the vault.
 - Owner: the implicit account `839d44f94fb99bb1412c68f2fa8534a8a739a1478d8bb1dc97663d02cca51d09`. Read its keys with `near account list-keys` on mainnet.
-- Before the swap, `make intents-keys` confirmed that the guardian and agent key files on the server are function-call keys.
+- `make intents-keys` stops when a full-access key file of the guardian or the agent is present on the machine it runs on.
 
 ## Transactions
 

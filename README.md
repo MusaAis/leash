@@ -47,8 +47,9 @@ Measured on NEAR testnet and, where a row says so, on mainnet. Every testnet row
 
 | Check | Result |
 |---|---|
+| Pinned build inputs | Rust 1.96.0 and near-sdk =5.28.3, see [docs/build.md](docs/build.md) |
 | Contract unit tests | 124 passed |
-| Agent unit tests | 389 passed |
+| Agent unit tests | 390 passed |
 | 1Click dry quotes against the live mainnet API, no funds | 9 sizes from 0.5 to 0.001 NEAR passed the guardian's checks, see [docs/intents.md](docs/intents.md) |
 | Mainnet: one vault, one real swap through it (0.1 NEAR to USDC on Base) | The vault's batch succeeded on chain and 1Click reported the swap as SUCCESS (0.37853 USDC delivered on Base); every transaction, the gas and the balances are in [docs/mainnet-proof.md](docs/mainnet-proof.md) |
 | Scripted testnet demo (`make demo-testnet`) | 12 checks passed, 0 failed |
@@ -75,7 +76,7 @@ make test-agent   # agent tests
 make check        # format check, lint, contract and agent tests
 ```
 
-Expected: `make test` ends with `test result: ok. 124 passed`, and `make test-agent` prints `Ran 389 tests` followed by `OK`.
+Expected: `make test` ends with `test result: ok. 124 passed`, and `make test-agent` prints `Ran 390 tests` followed by `OK`.
 
 ### Testnet demo (optional, needs network)
 
