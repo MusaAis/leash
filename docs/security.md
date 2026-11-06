@@ -67,7 +67,7 @@ The mainnet vault `leash-vault.near` is not locked. Its account has one full-acc
 
 Each of `leash-guardian.near` and `leash-agent.near` has one full-access key and one function-call key. The guardian's function-call key allows `approve_intent` on the vault. The agent's allows `spend` and `spend_intent`. `make intents-keys` stops when a full-access key file of these accounts is present on the machine it runs on. A holder of a full-access key can act in that account's role inside the caps and can move the account's own balance.
 
-Policy caps: 0.15 NEAR per transaction and 0.30 NEAR per 24 hours. Read the balance with `get_available_balance` and the keys of any account with `near account list-keys <account> network-config mainnet now`. Dated values are in the [mainnet proof](mainnet-proof.md#values-read-from-the-chain).
+The policy caps, the balances and the dates they were read are in the [table of values read from the chain](mainnet-proof.md#values-read-from-the-chain). Read the balance with `get_available_balance`, the caps with `get_policy` and the keys of any account with `near account list-keys <account> network-config mainnet now`.
 
 ## Deployment requirements
 

@@ -141,7 +141,7 @@ Events: `funded`, `withdrawn`, `policy_set`, `agent_removed`, `agent_paused`, `a
 
 Denial reasons: `all_paused`, `memo_too_long`, `agent_paused`, `zero_amount`, `over_per_tx_cap`, `not_allowlisted`, `over_daily_cap`, `insufficient_funds`.
 
-`spend_intent` has the same reasons, adds `intents_not_configured`, `unknown_route` and `no_approval`, and has no `memo_too_long`.
+`spend_intent` shares these except `memo_too_long` and `not_allowlisted`, and adds `intents_not_configured`, `unknown_route` and `no_approval`.
 
 ## Security
 

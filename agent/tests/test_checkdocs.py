@@ -66,7 +66,16 @@ class DocsChecks(unittest.TestCase):
     def test_dated_balance_in_prose(self):
         self.assertTrue(cd.snapshot_problems("s.md", "Available balance on 2026-11-06: 0.2874 NEAR."))
         self.assertEqual(cd.snapshot_problems("s.md", "Read the balance with `get_available_balance`."), [])
-        self.assertEqual(cd.snapshot_problems("s.md", "The swap ran on 2026-11-04."), [])
+        for bad in ("(guardian 0.080 NEAR, agent 0.250 NEAR on 2026-11-05)", "0.2874 NEAR as of 2026-11-06.", "On 2026-11-06 the vault had 0.29 NEAR.", "The swap ran on 2026-11-04."):
+            self.assertTrue(cd.snapshot_problems("s.md", bad), bad)
+        self.assertEqual(cd.snapshot_problems("s.md", "See [the table](mainnet-proof.md#2026-11-06) and `2026-11-06`.\n```\n2026-11-06\n```"), [])
+        self.assertTrue(cd.stale_phrases("CHANGELOG.md", "moves creation-key files"))
+        self.assertEqual(cd.stale_phrases("CHANGELOG.md", "moves full-access key files"), [])
+        from unittest import mock
+        with mock.patch.object(cd, "doc_paths", return_value=[]), mock.patch.object(cd, "text", return_value="creation key"):
+            self.assertTrue(cd.check_stale())
+        with mock.patch.object(cd, "doc_paths", return_value=[]), mock.patch.object(cd, "text", return_value="fine"):
+            self.assertEqual(cd.check_stale(), [])
 
     def test_anchors(self):
         target = {"a.md": "# One\n## Two words\n```\n# not a heading\n```\n## Same\n## Same\n"}

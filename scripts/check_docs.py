@@ -150,7 +150,7 @@ def check_links() -> list[str]:
 
 STALE = [r"not released", r"in progress", r"not deployed", r"placeholders?", r"to be measured", r"no LEASH contract",
          r"reported by", r"\(reported", r"reported, not shown", r"owner reports", r"owner's report", r"owner's statement",
-         r"inferred", r"unverified", r"not yet verified", r"rehearsal records"]
+         r"inferred", r"unverified", r"not yet verified", r"rehearsal records", r"creation[ -]key"]
 ROLES = "|".join(["LE" + "AD", "Re" + "viewer", "Bui" + "lder", "Advi" + "ser"])
 PRIVATE = [r"\b(?:" + ROLES + r")\b", r"\bReview \d+\b", r"\b[A-Z]-\d{1,3}\b", r"\bP\d+-\d+\b", r"\bR\d+-\d+\b",
            r"\bPatch \d+\b", r"\b" + "Mu" + r"sa\b"]
@@ -208,7 +208,11 @@ def wasm_problems(build_md: str, proof_md: str) -> list[str]:
 
 
 def snapshot_problems(name: str, body: str) -> list[str]:
-    return [f"{name} states a balance with a date in prose" for _ in re.findall(r"\bon 20\d\d-\d\d-\d\d[^\n]{0,80}\bNEAR\b", body)]
+    """Dated values live in the proof page: an ISO date may appear in links and code only."""
+    prose = re.sub(r"```.*?```", "", body, flags=re.S)
+    prose = re.sub(r"`[^`\n]*`", "", prose)
+    prose = re.sub(r"\[[^\]]*\]\([^)]*\)", "", prose)
+    return [f"{name} has a date in prose: {d}" for d in re.findall(r"\b20\d\d-\d\d-\d\d\b", prose)]
 
 
 def slug_set(body: str) -> set[str]:
@@ -241,7 +245,7 @@ def doc_paths() -> list[str]:
 
 
 def check_stale() -> list[str]:
-    return [p for d in doc_paths() for p in stale_phrases(d, text(d))]
+    return [p for d in dict.fromkeys([*doc_paths(), "CHANGELOG.md"]) for p in stale_phrases(d, text(d))]
 
 
 def check_private() -> list[str]:
