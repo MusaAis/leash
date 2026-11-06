@@ -7,7 +7,7 @@ One vault on NEAR mainnet and one real swap through it, run on 2026-11-04. Every
 - Vault: `leash-vault.near` (contract 0.2.0, not locked)
 - Guardian: `leash-guardian.near`, a function-call key limited to `approve_intent` on the vault
 - Agent: `leash-agent.near`, a function-call key limited to `spend` and `spend_intent` on the vault
-- Owner: the implicit account `839d44f94fb99bb1412c68f2fa8534a8a739a1478d8bb1dc97663d02cca51d09`. Its full-access key stays on the owner's device; no server holds it (the owner's statement).
+- Owner: the implicit account `839d44f94fb99bb1412c68f2fa8534a8a739a1478d8bb1dc97663d02cca51d09`. Read its keys with `near account list-keys` on mainnet.
 - At the time of the swap the server's key files held function-call keys only: `make intents-keys` printed OK for this check before the swap.
 
 ## Transactions
@@ -33,7 +33,7 @@ The quote is a 1Click request and has no transaction. The deployed code hash is 
 
 - Quote: 0.1 NEAR in, 378,371 units of USDC out (6 decimals, 0.378371 USDC), minimum 374,587, estimate 24 seconds. The guardian verified every field before approving.
 - Approval: expiry 05:17:07 UTC, 17 minutes; the spend ran at 05:02:58 UTC (block 222,973,632) and consumed it. `get_approvals` read back an empty list.
-- Result: about 0.3785 USDC was read in the recipient wallet on Base by hand after the swap (reported; no screenshot is published and the recipient address is not published here). The vault's wNEAR balance on `wrap.near` read `"0"`, so no refund was left in the vault.
+- Result: 1Click reported the swap as SUCCESS and delivered 0.37853 USDC on Base (quote: 0.378371, minimum 0.374587). The vault's wNEAR balance on `wrap.near` read `"0"`, so no refund was left in the vault.
 - On chain: the vault emitted `intent_sent`; `wrap.near` logged the 0.1 NEAR deposit and the transfer of 0.1 wNEAR from the vault to the deposit address. All receipts succeeded. `get_stats` read 1 allowed and 0 denied; `spent_in_window` read 0.1025 NEAR (the amount plus the two storage deposits).
 
 ## Gas, one measured sample

@@ -42,9 +42,15 @@ The agent account holds only gas money; funds stay in the vault. Model output is
 
 The owner can always call `withdraw` and `unwrap`, also while agents or the whole vault are paused. Deleting the full-access keys removes the ability to upgrade the contract; it does not remove the owner's exit.
 
+## Current mainnet state
+
+The mainnet vault `leash-vault.near` is not locked. Its account still has one full-access key. The holder of that key can replace the contract, and with it the policy, and can move the vault's funds. The vault stays unlocked while the contract can still change; the lock is planned for the final vault and removes that key. Available balance on 2026-11-06: 0.2874 NEAR (above the 0.1 NEAR contract reserve), read with `get_available_balance`. Policy caps: 0.15 NEAR per transaction and 0.30 NEAR per 24 hours. The lock was run on a testnet vault with `make lock-vault-testnet`: the key was deleted and the key list read back empty ([testnet proof](testnet-proof.md), Run 7).
+
+`leash-guardian.near` and `leash-agent.near` each have a creation key (full access) and one function-call key. The guardian's function-call key allows `approve_intent` on the vault; the agent's allows `spend` and `spend_intent`. `make intents-keys` stops when a full-access key file of these accounts is present on the machine it runs on. A holder of a creation key can act in that account's role inside the caps and can move the account's own balance (guardian 0.080 NEAR, agent 0.250 NEAR on 2026-11-05). Read the keys of any account with `near account list-keys <account> network-config mainnet now`.
+
 ## Deployment requirements
 
-Deploy and initialize in one batch. Delete all full-access keys on the vault account before it holds real funds. `make lock-vault-testnet` deletes one key and then checks the key list from the RPC; it was rehearsed on testnet (see [testnet proof](testnet-proof.md), Run 7).
+Deploy and initialize in one batch. The final vault is locked by deleting its full-access keys. `make lock-vault-testnet` deletes one key and then checks the key list from the RPC; it was rehearsed on testnet (see [testnet proof](testnet-proof.md), Run 7).
 
 ## Reporting
 
