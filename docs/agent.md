@@ -158,6 +158,10 @@ What this does and does not show. It is one model, ten attack texts and two live
 - Outside text is escaped before it reaches the model, and long input is refused.
 - The API key is read from the environment or `.env`, is never written to logs, and is only sent to the allowed host.
 
+## Model
+
+The default model is `z-ai/glm-5.3-flash` (`NEAR_AI_MODEL`). It is a canonical name, not an alias, and the gateway reports signature kind `provider_tee` for it (see the signature test below). LEASH records the signature kind and checks that the signed text matches the request and response hashes; it does not verify the signature. `make agent-signature MODELS="a b"` tests other models.
+
 ## Signature test (2026-11-01)
 
 `make agent-signature` asks each model one question and reports the kind of signature the gateway returns. It does not verify the signature. `MODELS="a b"` sets the models.

@@ -48,9 +48,9 @@ Measured on NEAR testnet and, where a row says so, on mainnet. Every testnet row
 | Check | Result |
 |---|---|
 | Contract unit tests | 117 passed |
-| Agent unit tests | 373 passed |
+| Agent unit tests | 380 passed |
 | 1Click dry quotes against the live mainnet API, no funds | 9 sizes from 0.5 to 0.001 NEAR passed the guardian's checks, see [docs/intents.md](docs/intents.md) |
-| Mainnet: one vault, one real swap through it (0.1 NEAR to USDC on Base) | The vault's batch succeeded on chain and the owner reports the USDC arrival; every transaction, the gas and the balances are in [docs/mainnet-proof.md](docs/mainnet-proof.md) |
+| Mainnet: one vault, one real swap through it (0.1 NEAR to USDC on Base) | The vault's batch succeeded on chain and 1Click reported the swap as SUCCESS (0.37853 USDC delivered on Base); every transaction, the gas and the balances are in [docs/mainnet-proof.md](docs/mainnet-proof.md) |
 | Scripted testnet demo (`make demo-testnet`) | 12 checks passed, 0 failed |
 | Hijacked agent on a fresh policy, every request sent straight to the vault | 14 requests: 11 blocked by the vault, 3 paid to the allowlisted payee inside the caps (by design), 0 paid to a non-payee |
 | Live model, attack text only | Control task passed. 10 of 10 attacks refused by the agent, and 30 of 30 with three samples per attack at temperature 0.7 |
@@ -75,7 +75,7 @@ make test-agent   # agent tests
 make check        # format check, lint, contract and agent tests
 ```
 
-Expected: `make test` ends with `test result: ok. 117 passed`, and `make test-agent` prints `Ran 373 tests` followed by `OK`.
+Expected: `make test` ends with `test result: ok. 117 passed`, and `make test-agent` prints `Ran 380 tests` followed by `OK`.
 
 ### Testnet demo (optional, needs network)
 
@@ -109,10 +109,10 @@ Before it sends anything, the suite checks the vault (policy, pauses, allowlist,
 
 | NEAR feature | Use in LEASH | State |
 |---|---|---|
-| Smart contract (Rust, near-sdk 5) | The vault: custody, policy engine, event log | Implemented, deployed on testnet |
+| Smart contract (Rust, near-sdk 5) | The vault: custody, policy engine, event log | Implemented; deployed on testnet and mainnet |
 | Separate named accounts | Vault, owner, agent and payee are different accounts, so the agent never holds the funds | Implemented |
 | One-yoctoNEAR rule | Owner methods that move funds or widen limits need exactly 1 yoctoNEAR, which function-call keys cannot attach. A leaked function-call key can only pause | Implemented and tested |
-| Full-access key removal | `make lock-vault-testnet` deletes the vault's full-access keys, so no one can bypass the policy or replace the contract | Script ready, for the final vault |
+| Full-access key removal | `make lock-vault-testnet` deletes the vault's full-access keys, so no one can bypass the policy or replace the contract | Run on a testnet vault; planned for the final mainnet vault |
 | NEP-297 style events | `EVENT_JSON:` logs with standard `leash` for every decision | Implemented |
 | NEAR AI Cloud | The agent's decisions, through its OpenAI-compatible API | Implemented |
 | NEAR Intents (1Click) | The guardian builds and checks quotes; the vault pays the deposit address through wNEAR. One swap of 0.1 NEAR to USDC on Base ran on mainnet | Implemented; one mainnet swap recorded (vault side shown on chain) |
@@ -130,7 +130,12 @@ Before it sends anything, the suite checks the vault (policy, pauses, allowlist,
 | `pause_agent(agent)`, `pause_all()` | Owner | No deposit needed: these only reduce risk |
 | `resume_agent(agent)`, `resume_all()` | Owner | Requires 1 yoctoNEAR |
 | `spend(to, amount, memo)` | Agent | Returns `true` if scheduled, `false` if denied |
-| `get_policy`, `get_stats`, `get_owner`, `is_paused_all`, `get_available_balance` | Anyone | Views |
+| `set_intents_config(wnear, guardian)` | Owner | Requires 1 yoctoNEAR; revokes every pending approval |
+| `set_routes(agent, routes)` | Owner | Requires 1 yoctoNEAR; up to 10 routes (destination asset and recipient) per agent; clears that agent's approvals |
+| `approve_intent(agent, route_id, deposit_account, amount, expires_ns, quote_hash)` | Guardian | Single-use approval, at most 30 minutes, at most 5 pending per agent |
+| `spend_intent(route_id, deposit_account, amount)` | Agent | Same checks as `spend` plus a matching approval; pays the deposit address through wNEAR |
+| `unwrap(amount)` | Owner | Requires 1 yoctoNEAR; converts wNEAR back to NEAR, also while paused |
+| `get_policy`, `get_stats`, `get_owner`, `is_paused_all`, `get_available_balance`, `get_guardian`, `get_wnear`, `get_routes`, `get_approvals` | Anyone | Views |
 
 Events: `funded`, `withdrawn`, `policy_set`, `agent_removed`, `agent_paused`, `agent_resumed`, `paused_all`, `resumed_all`, `spend_allowed`, `spend_denied`. Denial reasons: `all_paused`, `memo_too_long`, `agent_paused`, `zero_amount`, `over_per_tx_cap`, `not_allowlisted`, `over_daily_cap`, `insufficient_funds`.
 
@@ -168,7 +173,7 @@ Makefile             short entry points for every command above
 | Agent runtime with NEAR AI Cloud decisions and attack suite | Implemented, tested on testnet |
 | Mainnet deployment | One vault deployed and used for one swap, see [proof](docs/mainnet-proof.md) |
 | 1Click dry quotes with a guardian check | Implemented, live dry quotes recorded in [docs/intents.md](docs/intents.md) |
-| Cross-chain payment through the vault | Done once on mainnet; the USDC arrival is the owner's report |
+| Cross-chain payment through the vault | Done once on mainnet; 1Click reported SUCCESS and 0.37853 USDC delivered on Base |
 | Arena, SDK | Planned |
 
 ## Documentation
@@ -180,6 +185,8 @@ Makefile             short entry points for every command above
 - [NEAR Intents quotes](docs/intents.md)
 - [Testnet proof](docs/testnet-proof.md)
 - [Mainnet proof](docs/mainnet-proof.md)
+- [Build and artifact](docs/build.md)
+- [Documentation index](docs/README.md)
 - [Architecture decisions](docs/adr)
 - [Changelog](CHANGELOG.md)
 
