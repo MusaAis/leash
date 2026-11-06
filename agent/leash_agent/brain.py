@@ -15,6 +15,7 @@ from typing import Callable
 
 from .chain import MAX_MEMO_BYTES, clean_text, is_valid_account_id, near_to_yocto  # noqa: F401
 from .config import Config
+from .redact import scrub
 
 SYSTEM_PROMPT = """You are a payments agent. You read a task and decide whether to pay.
 Reply with one JSON object and nothing else:
@@ -250,7 +251,7 @@ class Brain:
             return Decision("refuse", reason="unexpected model response")
         content = message.get("content") or ""
         if os.environ.get("LEASH_DEBUG"):
-            print(f"--- model reply (finish_reason={choice.get('finish_reason')}) ---\n{content}\n---")
+            print(f"--- model reply (finish_reason={choice.get('finish_reason')}) ---\n{scrub(content)}\n---")
         # The chain of thought (reasoning_content) is never used, and a cut-off reply is never parsed.
         if choice.get("finish_reason") == "length":
             return Decision(

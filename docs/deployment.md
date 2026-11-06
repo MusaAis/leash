@@ -43,7 +43,7 @@ make lock-vault-testnet
 
 The script lists the vault's full-access keys (read from the RPC as JSON; `LEASH_RPC_URL` overrides the endpoint), asks which one to delete, refuses a key that is not a full-access key of the vault, and requires you to type the account name. After the deletion it reads the key list again and fails unless no full-access key remains, or if the RPC cannot be read. Run the demo first: deleting the last key is irreversible. Lock only the final vault, and rehearse on a separate prefix.
 
-Locking removes upgrades, not the owner's exit: `withdraw` stays available to the owner and is not blocked by pause. After locking, a bug in the contract cannot be patched in place.
+Locking removes upgrades. After locking, a bug in the contract cannot be patched in place.
 
 ## Guardian key (contract 0.2.0)
 

@@ -21,6 +21,11 @@ ONE_NEAR="1000000000000000000000000"
 TWO_NEAR="2000000000000000000000000"
 THREE_NEAR="3000000000000000000000000"
 
+# require_testnet NAME: scripts that fund, deploy or spend refuse any other network.
+require_testnet() {
+  [ "$NETWORK" = "testnet" ] || { echo "$1 is for testnet only (NETWORK=$NETWORK)." >&2; exit 1; }
+}
+
 step() {
   printf '\n== %s\n' "$1"
 }

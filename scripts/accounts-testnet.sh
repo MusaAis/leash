@@ -6,6 +6,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/config.sh
+require_testnet accounts-testnet
 
 MOVED=()
 for id in "$VAULT" "$OWNER" "$AGENT" "$GUARDIAN" "$PAYEE" "$ATTACKER"; do

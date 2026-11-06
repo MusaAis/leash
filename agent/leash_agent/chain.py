@@ -12,6 +12,7 @@ from decimal import Decimal, InvalidOperation, localcontext
 from typing import Callable
 
 from .config import Config
+from .redact import scrub
 
 RETURN_MARKER = "Function execution return value (printed to stdout):"
 EVENT_PREFIX = "EVENT_JSON:"
@@ -171,9 +172,9 @@ def run_near(args: list[str]) -> str:
         raise ChainError("near CLI timed out") from exc
     stdout, stderr = proc.stdout or "", proc.stderr or ""
     if os.environ.get("LEASH_DEBUG"):
-        print(f"--- near stderr ---\n{stderr}\n--- near stdout ---\n{stdout}")
+        print(f"--- near stderr ---\n{scrub(stderr)}\n--- near stdout ---\n{scrub(stdout)}")
     if proc.returncode != 0:
-        raise ChainError(f"near CLI failed: {_tail(stderr + stdout, 500)}")
+        raise ChainError(f"near CLI failed: {scrub(_tail(stderr + stdout, 500))}")
     return stderr + STDOUT_SENTINEL + stdout
 
 

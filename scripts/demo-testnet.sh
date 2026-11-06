@@ -4,6 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/config.sh
+require_testnet demo-testnet
 
 pay() { printf '{"to":"%s","amount":"%s","memo":"%s"}' "$1" "$2" "$3"; }
 

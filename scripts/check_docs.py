@@ -8,6 +8,7 @@ those come from a recorded run (see docs/testnet-proof.md).
 
 from __future__ import annotations
 
+import posixpath
 import re
 import subprocess
 import sys
@@ -146,6 +147,143 @@ def check_links() -> list[str]:
     return problems
 
 
+
+STALE = [r"not released", r"in progress", r"not deployed", r"placeholders?", r"to be measured", r"no LEASH contract",
+         r"reported by", r"\(reported", r"reported, not shown", r"owner reports", r"owner's report", r"owner's statement",
+         r"inferred", r"unverified", r"not yet verified", r"rehearsal records", r"creation[ -]key"]
+ROLES = "|".join(["LE" + "AD", "Re" + "viewer", "Bui" + "lder", "Advi" + "ser"])
+PRIVATE = [r"\b(?:" + ROLES + r")\b", r"\bReview \d+\b", r"\b[A-Z]-\d{1,3}\b", r"\bP\d+-\d+\b", r"\bR\d+-\d+\b",
+           r"\bPatch \d+\b", r"\b" + "Mu" + r"sa\b"]
+
+
+def stale_phrases(name: str, body: str) -> list[str]:
+    return [f"{name} contains `{p}`" for p in STALE if re.search(p, body, re.I)]
+
+
+def private_shapes(name: str, body: str) -> list[str]:
+    return [f"{name} matches the private shape /{p}/" for p in PRIVATE if re.search(p, body)]
+
+
+def contract_part(source: str) -> str:
+    return source[: source.index("#[cfg(test)]")] if "#[cfg(test)]" in source else source
+
+
+def interface_gaps(source: str, readme: str) -> list[str]:
+    part = contract_part(source)
+    names = re.findall(r"^\s*pub fn (\w+)\(", part[part.index("pub fn new("):], re.M)
+    return [f"README has no entry for the contract method `{n}`" for n in names if not re.search(r"`%s[`(]" % n, readme)]
+
+
+def event_gaps(source: str, readme: str) -> list[str]:
+    events = sorted(set(re.findall(r'emit\(\s*"([a-z_]+)"', contract_part(source))))
+    line = next((ln for ln in readme.splitlines() if ln.startswith("Events:")), "")
+    return [f"README event list has no `{e}`" for e in events if f"`{e}`" not in line]
+
+
+def badge_problems(readme: str, has_mainnet_proof: bool) -> list[str]:
+    badge = re.search(r"badge/network-([^\"\s]*?)-informational", readme)
+    if not badge:
+        return ["README has no network badge"]
+    if has_mainnet_proof and "mainnet" not in badge.group(1).lower():
+        return ["README badge omits mainnet, but docs/mainnet-proof.md exists"]
+    return []
+
+
+def pin_problems(cargo_toml: str, build_md: str) -> list[str]:
+    pins = set(re.findall(r'near-sdk[^\n]*"=(\d+\.\d+\.\d+)"', cargo_toml))
+    if len(pins) != 1:
+        return [f"contract/Cargo.toml must pin near-sdk exactly once with =X.Y.Z (found {sorted(pins)})"]
+    return [] if pins.copy().pop() in build_md else ["docs/build.md does not state the near-sdk version of the pin"]
+
+
+def wasm_problems(build_md: str, proof_md: str) -> list[str]:
+    problems = []
+    for label, pattern in (("sha256", r"sha256\s*\|\s*`([0-9a-f]{64})`"), ("code hash", r"base58\)\s*\|\s*`(\w+)`")):
+        found = re.search(pattern, build_md)
+        if not found:
+            problems.append(f"docs/build.md has no {label} row")
+        elif found.group(1) not in proof_md:
+            problems.append(f"docs/mainnet-proof.md does not contain the {label} of docs/build.md")
+    return problems
+
+
+def snapshot_problems(name: str, body: str) -> list[str]:
+    """Dated values live in the proof page: an ISO date may appear in links and code only."""
+    prose = re.sub(r"```.*?```", "", body, flags=re.S)
+    prose = re.sub(r"`[^`\n]*`", "", prose)
+    prose = re.sub(r"\[[^\]]*\]\([^)]*\)", "", prose)
+    return [f"{name} has a date in prose: {d}" for d in re.findall(r"\b20\d\d-\d\d-\d\d\b", prose)]
+
+
+def slug_set(body: str) -> set[str]:
+    seen: dict[str, int] = {}
+    slugs = set()
+    for heading in re.findall(r"^#+\s+(.*)$", re.sub(r"```.*?```", "", body, flags=re.S), re.M):
+        base = re.sub(r"\s", "-", re.sub(r"[^\w\s-]", "", heading.strip().lower()))
+        count = seen.get(base, 0)
+        seen[base] = count + 1
+        slugs.add(base if count == 0 else f"{base}-{count}")
+    return slugs
+
+
+def anchor_gaps(name: str, body: str, targets: dict[str, str]) -> list[str]:
+    problems = []
+    for path, frag in re.findall(r"\]\(([^)#\s]*)#([^)\s]+)\)", body):
+        if re.match(r"(https?:|mailto:)", path):
+            continue
+        key = posixpath.normpath(posixpath.join(posixpath.dirname(name), path)) if path else name
+        other = targets.get(key)
+        if other is not None and frag not in slug_set(other):
+            problems.append(f"{name} links to {path}#{frag}, which has no such heading")
+    return problems
+
+
+def doc_paths() -> list[str]:
+    docs = sorted(str(p.relative_to(ROOT)) for p in (ROOT / "docs").glob("*.md"))
+    adrs = sorted(str(p.relative_to(ROOT)) for p in (ROOT / "docs/adr").glob("*.md"))
+    return ["README.md", "SECURITY.md", *docs, *adrs]
+
+
+def check_stale() -> list[str]:
+    return [p for d in dict.fromkeys([*doc_paths(), "CHANGELOG.md"]) for p in stale_phrases(d, text(d))]
+
+
+def check_private() -> list[str]:
+    return [p for d in [*doc_paths(), "CHANGELOG.md"] for p in private_shapes(d, text(d))]
+
+
+def check_interface() -> list[str]:
+    return interface_gaps(text("contract/src/lib.rs"), text("README.md"))
+
+
+def check_events() -> list[str]:
+    return event_gaps(text("contract/src/lib.rs"), text("README.md"))
+
+
+def check_badge() -> list[str]:
+    return badge_problems(text("README.md"), (ROOT / "docs/mainnet-proof.md").exists())
+
+
+def check_pin() -> list[str]:
+    if not (ROOT / "docs/build.md").exists():
+        return ["docs/build.md is missing"]
+    return pin_problems(text("contract/Cargo.toml"), text("docs/build.md"))
+
+
+def check_wasm_facts() -> list[str]:
+    if not (ROOT / "docs/build.md").exists():
+        return ["docs/build.md is missing"]
+    return wasm_problems(text("docs/build.md"), text("docs/mainnet-proof.md"))
+
+
+def check_snapshot() -> list[str]:
+    return snapshot_problems("docs/security.md", text("docs/security.md"))
+
+
+def check_anchors() -> list[str]:
+    targets = {d: text(d) for d in doc_paths()}
+    return [p for d in targets for p in anchor_gaps(d, targets[d], targets)]
+
 CHECKS = [
     ("STATE.md and CHANGELOG.md match the git tags", check_versions),
     ("test counts in the docs match the code", check_test_counts),
@@ -154,6 +292,15 @@ CHECKS = [
     ("cost-limit defaults in the docs match the code", check_limits),
     ("every `make` target in the docs exists", check_make_targets),
     ("relative links in the docs resolve", check_links),
+    ("no stale status phrases in the docs", check_stale),
+    ("no private process terms in the docs", check_private),
+    ("README lists every contract method", check_interface),
+    ("README lists every contract event", check_events),
+    ("no dated balance in docs/security.md", check_snapshot),
+    ("README network badge matches the proofs", check_badge),
+    ("near-sdk pin is stated in docs/build.md", check_pin),
+    ("artifact hashes in docs/build.md match the mainnet proof", check_wasm_facts),
+    ("heading anchors in links exist", check_anchors),
 ]
 
 if __name__ == "__main__":

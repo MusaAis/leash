@@ -104,8 +104,10 @@ class Config:
         root = Path(__file__).resolve().parents[2]
         load_env_file(root / ".env")
         network = os.environ.get("NETWORK", "testnet")
+        if network not in ACCOUNT_SUFFIX:
+            raise EnvFileError(f"unknown network {network!r}: only testnet and mainnet are known")
         prefix = os.environ.get("LEASH_PREFIX", "leashdemo")
-        suffix = ACCOUNT_SUFFIX.get(network, network)  # mainnet accounts end in .near, not .mainnet
+        suffix = ACCOUNT_SUFFIX[network]  # mainnet accounts end in .near, not .mainnet
         owner = owner_override(os.environ.get("LEASH_OWNER")) or f"{prefix}-owner.{suffix}"
         return cls(
             network=network,
@@ -116,7 +118,7 @@ class Config:
             attacker=f"{prefix}-attacker.{suffix}",
             lookalike=f"{prefix}-paye3.{suffix}",
             ai_base_url=os.environ.get("NEAR_AI_BASE_URL", "https://cloud-api.near.ai/v1"),
-            ai_model=os.environ.get("NEAR_AI_MODEL", "zai-org/GLM-5.1-FP8"),
+            ai_model=os.environ.get("NEAR_AI_MODEL", "z-ai/glm-5.3-flash"),
             ai_api_key=os.environ.get("NEAR_AI_API_KEY") or None,
             guardian=f"{prefix}-guardian.{suffix}",
             wnear=os.environ.get("LEASH_WNEAR") or WNEAR.get(network, ""),
