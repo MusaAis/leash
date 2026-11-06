@@ -1,6 +1,6 @@
 # NEAR Intents quotes (1Click)
 
-What exists in this release: a client for the 1Click API and a guardian that builds a quote request from fixed rules and checks the answer. It asks for **dry quotes only**. No deposit is made, no funds move, and the vault does not call Intents yet.
+Contents: a client for the 1Click API, a guardian that builds a quote request from fixed rules and checks the answer, and the commands that carry an approved quote through the vault. Dry quotes only move no funds. Real payments go through the vault: the guardian approves one quote at a time on the vault and the agent then calls `spend_intent` (see [mainnet proof](mainnet-proof.md) for one real swap).
 
 ## Run it
 
@@ -26,7 +26,7 @@ Expected: `intents-dry` ends with `verified: amountIn=... amountOut=... minAmoun
 
 - A request with the default Python user agent got HTTP 403 (Cloudflare error 1010). The client sends `User-Agent: leash-agent/0.3 (+https://github.com/MusaAis/leash)`.
 - The token list holds exactly one USDC on Base: `nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near` (6 decimals).
-- Without an API key, 1Click adds one fee entry to the echoed request: `fee: 20` (20 bps, 0.2%) to the account `5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd`. It was identical in every answer. The guardian accepts exactly this entry and rejects any other `appFees` value. The docs (docs.near-intents.org, fees page) state a 0.2% fee without an API key; they do not name this account, so it is **inferred** to belong to 1Click. Effect if wrong: at most 0.2% of a swap. If 1Click changes it, the guardian refuses.
+- Without an API key, 1Click adds one fee entry to the echoed request: `fee: 20` (20 bps, 0.2%) to the account `5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd`. It was identical in every answer. The guardian accepts exactly this entry and rejects any other `appFees` value. The docs (docs.near-intents.org, fees page) state a 0.2% fee without an API key and do not name this account. The effect is at most 0.2% of a swap. If 1Click changes it, the guardian refuses.
 - In the 0.5 NEAR answer: `refundFee` 0 and `withdrawFee` 2400 (0.0024 USDC). It was not read at other sizes.
 
 | NEAR in | USDC out (6 decimals) | Estimate (s) |
@@ -59,7 +59,13 @@ make intents-wet-probe        # one real quote of 0.1 NEAR: prints the deposit a
 make wrap-storage             # read-only: wrap.near storage bounds and the storage balance of the probe's address (ACCOUNT=x.near adds more)
 ```
 
-The probe never deposits. Never send funds to the address it prints. The storage check sends no transaction and holds no key; it reads `LEASH_RPC_URL` (default: a public node from the NEAR docs list). Read on 2026-11-01: the storage deposit of `wrap.near` is 0.00125 NEAR (minimum and maximum are the same). The storage balance of both deposit addresses above was `null` (not registered), so a fresh deposit address is not registered there. The planned payment batch registers it first (design, untested).
+The probe never deposits. Never send funds to the address it prints. The storage check sends no transaction and holds no key; it reads `LEASH_RPC_URL` (default: a public node from the NEAR docs list). Read on 2026-11-01: the storage deposit of `wrap.near` is 0.00125 NEAR (minimum and maximum are the same). The storage balance of both deposit addresses above was `null` (not registered), so a fresh deposit address is not registered there. The vault's payment batch registers the deposit account first (see [mainnet proof](mainnet-proof.md)).
+
+## Routes are stored on the vault
+
+The owner stores each route (destination asset and recipient) on the vault with `set_routes`. Routes are readable by anyone through `get_routes`. `intents-quote` reads the route of the agent from the vault and builds the quote from it; a value in `.env` can only confirm it, and a difference is refused. A missing route is refused. `intents-dry` and `intents-wet-probe` still read the route from `.env`. The recipient is never printed.
+
+What the guardian checks off-chain and what the contract enforces are set out in the [security model](security.md) and in [ADR 0005](adr/0005-intents-design-and-trust.md).
 
 ## Call path through the vault (unit-tested; run on testnet and once on mainnet, see [mainnet proof](mainnet-proof.md))
 
@@ -69,7 +75,7 @@ Each command builds one `near` call, checks the network guard first (mainnet nee
 make intents-keys                                  # testnet: function-call keys for the guardian and the agent (plan; YES=1 sends; ASIDE=1 moves creation-key files off the machine). Mainnet: read-only check
 make intents-config  CONFIRM_VAULT=<vault> YES=1   # owner: set the wNEAR contract and the guardian (1 yocto; revokes approvals)
 make intents-routes  CONFIRM_VAULT=<vault> YES=1   # owner: set route 0 from LEASH_ROUTE_DEST_ASSET and LEASH_ROUTE_RECIPIENT
-make intents-quote   SWAP_AMOUNT=0.1 YES=1         # guardian: one real quote, verified and saved in the private log (mainnet only)
+make intents-quote   SWAP_AMOUNT=0.1 YES=1         # guardian: one real quote built from the route stored on the vault, verified and saved in the private log (mainnet only)
 make intents-approve SWAP_AMOUNT=0.1 YES=1         # guardian key: one single-use approval from the saved quote
 make intents-spend   SWAP_AMOUNT=0.1 YES=1         # agent key: spend_intent with the approved deposit account
 make intents-status                                # read-only: approvals, stats, policy counters, vault balance
@@ -85,12 +91,12 @@ make intents-status                                # read-only: approvals, stats
 - **Order of the log.** Outside testnet the private log entries for an approval or a spend are written right before the transaction is handed to the CLI, after every refusal. A send the CLI reports as failed is logged as failed and does not count as an approval or a spend; the CLI error does not prove that the transaction did not land, so `make intents-status` is run before a retry. Before an approval the chain is asked for the agent's approvals too, and an approval for the same deposit account refuses a second one.
 - **Repeated spend.** If an earlier spend for the same approval was already sent, the screen says so and asks for `make intents-status` first; the spend is not refused, because a spend that failed before it counted anything may be retried.
 - `spend_intent` has its own gas setting, `LEASH_INTENT_GAS_TGAS`: default 150, refused below 120 or above 300. The 30 Tgas default stays for `spend`. The contract panics early below 120.
-- The node refuses a call whose reserved cost (about 0.001 NEAR per prepaid Tgas plus 0.001: 0.031 NEAR at 30 Tgas, 0.151 NEAR at 150 Tgas on testnet) is above the key allowance, so each account must be funded above that cost (mainnet plan: guardian 0.08 NEAR, agent 0.25 NEAR). The allowance is the most gas a leaked key can burn. The unused part of the reservation returns to the allowance: after one `approve_intent` and one `spend_intent` on testnet the allowances fell by 0.00023 NEAR (guardian) and 0.00099 NEAR (agent), equal to the transaction fees shown by the explorer. The explorer shows gas use of 2.539 Tgas for `approve_intent` (30 prepaid) and 10.556 Tgas for `spend_intent` (150 prepaid, the whole receipt tree, one sample on `wrap.testnet`); a receipt-by-receipt reading was not made, and nothing here is measured on mainnet. The gas numbers in the contract are still placeholders.
+- The node refuses a call whose reserved cost (about 0.001 NEAR per prepaid Tgas plus 0.001: 0.031 NEAR at 30 Tgas, 0.151 NEAR at 150 Tgas on testnet) is above the key allowance, so each account must be funded above that cost (mainnet plan: guardian 0.08 NEAR, agent 0.25 NEAR). The allowance is the most gas a leaked key can burn. The unused part of the reservation returns to the allowance: after one `approve_intent` and one `spend_intent` on testnet the allowances fell by 0.00023 NEAR (guardian) and 0.00099 NEAR (agent), equal to the transaction fees shown by the explorer. The explorer shows gas use of 2.539 Tgas for `approve_intent` (30 prepaid) and 10.556 Tgas for `spend_intent` (150 prepaid, the whole receipt tree, one sample on `wrap.testnet`); a receipt-by-receipt reading was not made, and nothing here is measured on mainnet. The contract's gas constants (120 Tgas minimum, 10 Tgas per action) are unchanged; the one mainnet sample is in the [mainnet proof](mainnet-proof.md).
 - While `intents-routes` runs, the recipient is an argument of the `near` process and is visible in the process list of that machine. It is public on the chain through `get_routes` anyway; run owner commands only on a machine that only the owner uses.
 - The loss through a swap is bounded by the daily cap per fixed 24-hour window; across a window boundary, up to twice the daily cap.
 
-## Not done in this release
+## Limits
 
-- One real swap through the vault has been done on mainnet (0.1 NEAR to USDC on Base, see [mainnet proof](mainnet-proof.md)). 1Click gave no minimum in dry quotes down to 0.001 NEAR and the 0.1 NEAR deposit went through (the USDC arrival is the owner's report); a minimum for smaller sizes at deposit time is untested.
+- One real swap through the vault has been done on mainnet (0.1 NEAR to USDC on Base, see [mainnet proof](mainnet-proof.md)). 1Click gave no minimum in dry quotes down to 0.001 NEAR and the 0.1 NEAR deposit went through (1Click reported the swap as SUCCESS and delivered 0.37853 USDC on Base); a minimum for smaller sizes at deposit time is untested.
 - The quote signature is not verified.
 - **Testnet run of the success case** (function-call keys only on the machine, creation-key files set aside): `approve_intent` and `spend_intent` for 0.1 NEAR to a rehearsal deposit account were both accepted, the vault emitted `intent_approved` and `intent_sent`, and `wrap.testnet` logged the deposit and the transfer. The counter grew by 0.1025 NEAR (amount plus both storage deposits). The vault's available balance fell by 0.09891 NEAR: 0.1 for the swap, 0.00125 for registering the deposit account (the vault was already registered and its deposit was refunded), minus 0.00234 of storage released when the approval was consumed. Transactions: `approve_intent` 4FKPhfKMmADoMkdCEUy43EurmbcSKCRVLCd3JfjDEh2s, `spend_intent` 344BekmvMeNuW8yA2yrEFyxT9WgRkQSBzNjXTRh4aj3F.
