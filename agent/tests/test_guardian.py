@@ -362,11 +362,17 @@ class StoredRoutesTests(unittest.TestCase):
 
         return read
 
-    def test_it_returns_the_stored_route_and_reads_the_vault_once(self):
+    def test_it_returns_the_stored_route_and_reads_the_vault_on_every_call(self):
         routes = StoredRoutes(self.reader(self.STORED))
         self.assertEqual(routes.get("a.near", 0), Route(ASSET, "0xStored"))
         routes.get("a.near", 0)
-        self.assertEqual(self.calls, [("get_routes", {"agent": "a.near"})])
+        self.assertEqual(self.calls, [("get_routes", {"agent": "a.near"})] * 2)
+
+    def test_a_route_the_owner_replaced_is_seen_on_the_next_call(self):
+        answers = [[{"dest_asset": ASSET, "recipient": "0xOld"}], [{"dest_asset": ASSET, "recipient": "0xNew"}]]
+        routes = StoredRoutes(lambda method, args: answers.pop(0))
+        self.assertEqual(routes.get("a.near", 0).recipient, "0xOld")
+        self.assertEqual(routes.get("a.near", 0).recipient, "0xNew")
 
     def test_an_env_that_matches_or_is_empty_is_accepted(self):
         for expect in (Route(ASSET, "0xStored"), Route("", ""), Route(ASSET, "")):

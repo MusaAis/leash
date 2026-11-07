@@ -49,9 +49,9 @@ Measured on NEAR testnet and, where a row says so, on mainnet. Every testnet row
 |---|---|
 | Pinned build inputs | Rust 1.96.0 and near-sdk =5.28.3, see [docs/build.md](docs/build.md) |
 | Contract unit tests | 142 passed |
-| Agent unit tests | 395 passed |
+| Agent unit tests | 398 passed |
 | 1Click dry quotes against the live mainnet API, no funds | 9 sizes from 0.5 to 0.001 NEAR passed the guardian's checks, see [docs/intents.md](docs/intents.md) |
-| Mainnet: one vault, one real swap through it (0.1 NEAR to USDC on Base) | The vault's batch succeeded on chain and 1Click reported the swap as SUCCESS (0.37853 USDC delivered on Base); every transaction, the gas and the balances are in [docs/mainnet-proof.md](docs/mainnet-proof.md) |
+| Mainnet: one vault, one real swap through it (0.1 NEAR to USDC on Base) | The vault's batch succeeded on chain and 1Click returned status SUCCESS (0.37853 USDC delivered on Base); every transaction, the gas and the balances are in [docs/mainnet-proof.md](docs/mainnet-proof.md) |
 | Scripted testnet demo (`make demo-testnet`) | 12 checks passed, 0 failed |
 | Hijacked agent on a fresh policy, every request sent straight to the vault | 14 requests: 11 blocked by the vault, 3 paid to the allowlisted payee inside the caps (by design), 0 paid to a non-payee |
 | Live model, attack text only | Control task passed. 10 of 10 attacks refused by the agent, and 30 of 30 with three samples per attack at temperature 0.7 |
@@ -65,7 +65,7 @@ Two live runs and ten attack texts on testnet. The vault, not the model, is the 
 Prerequisites:
 
 - Rust 1.96.0 (installed by `contract/rust-toolchain.toml` when you use rustup) with the `wasm32-unknown-unknown` target, and `make`
-- Python 3.12, the version CI and the tests run on (agent runtime and its tests; no third-party packages; older versions are untested)
+- Python 3.12, the version CI and the tests run on (agent runtime and its tests; no third-party packages)
 - For the wasm build and the testnet demo only: [cargo-near](https://github.com/near/cargo-near), [near-cli-rs](https://github.com/near/near-cli-rs) and network access. See the [deployment guide](docs/deployment.md).
 
 Run the tests:
@@ -76,7 +76,7 @@ make test-agent   # agent tests
 make check        # format check, lint, contract and agent tests
 ```
 
-Expected: `make test` ends with `test result: ok. 142 passed`, and `make test-agent` prints `Ran 395 tests` followed by `OK`.
+Expected: `make test` ends with `test result: ok. 142 passed`, and `make test-agent` prints `Ran 398 tests` followed by `OK`.
 
 ### Testnet demo (optional, needs network)
 
@@ -177,7 +177,7 @@ Makefile             short entry points for every command above
 | Agent runtime with NEAR AI Cloud decisions and attack suite | Implemented, tested on testnet |
 | Mainnet deployment | One vault deployed and used for one swap, see [proof](docs/mainnet-proof.md) |
 | 1Click dry quotes with a guardian check | Implemented, live dry quotes recorded in [docs/intents.md](docs/intents.md) |
-| Cross-chain payment through the vault | Done once on mainnet; 1Click reported SUCCESS and 0.37853 USDC delivered on Base |
+| Cross-chain payment through the vault | Done once on mainnet; 1Click returned status SUCCESS and 0.37853 USDC delivered on Base |
 | Arena, SDK | Planned |
 
 ## Documentation

@@ -163,7 +163,7 @@ def check_links() -> list[str]:
 
 STALE = [r"not released", r"in progress", r"not deployed", r"placeholders?", r"to be measured", r"no LEASH contract",
          r"reported by", r"\(reported", r"reported, not shown", r"owner reports", r"owner's report", r"owner's statement",
-         r"inferred", r"unverified", r"not yet verified", r"rehearsal records", r"creation[ -]key"]
+         r"\breported\b", r"\buntested\b", r"inferred", r"unverified", r"not yet verified", r"rehearsal records", r"creation[ -]key"]
 ROLES = "|".join(["LE" + "AD", "Re" + "viewer", "Bui" + "lder", "Advi" + "ser"])
 PRIVATE = [r"\b(?:" + ROLES + r")\b", r"\bReview \d+\b", r"\b[A-Z]-\d{1,3}\b", r"\bP\d+-\d+\b", r"\bR\d+-\d+\b",
            r"\bPatch \d+\b", r"\b" + "Mu" + r"sa\b"]
@@ -242,12 +242,24 @@ def wasm_problems(build_md: str, proof_md: str) -> list[str]:
     return problems
 
 
+MONTHS = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?"
+DATE_SHAPES = [
+    r"\b20\d\d-\d\d-\d\d\b",
+    r"\b20\d\d/\d\d?/\d\d?\b",
+    r"\b\d\d?/\d\d?/20\d\d\b",
+    r"\b" + MONTHS + r" \d{1,2}(?:st|nd|rd|th)?(?:,? 20\d\d)?\b",
+    r"\b\d{1,2}(?:st|nd|rd|th)? " + MONTHS + r"(?: 20\d\d)?\b",
+]
+
+
 def snapshot_problems(name: str, body: str) -> list[str]:
-    """Dated values live in the proof page: an ISO date may appear in links and code only."""
+    """Dated values live in a table row: a date may appear in links, code and tables only."""
     prose = re.sub(r"```.*?```", "", body, flags=re.S)
+    prose = re.sub(r"^\|.*$", "", prose, flags=re.M)
     prose = re.sub(r"`[^`\n]*`", "", prose)
     prose = re.sub(r"\[[^\]]*\]\([^)]*\)", "", prose)
-    return [f"{name} has a date in prose: {d}" for d in re.findall(r"\b20\d\d-\d\d-\d\d\b", prose)]
+    found = [m.group(0) for shape in DATE_SHAPES for m in re.finditer(shape, prose)]
+    return [f"{name} has a date in prose: {d}" for d in found]
 
 
 def slug_set(body: str) -> set[str]:
@@ -335,8 +347,12 @@ def check_wasm_facts() -> list[str]:
     return wasm_problems(text("docs/build.md"), text("docs/mainnet-proof.md"))
 
 
+SNAPSHOT_EXEMPT = {"docs/testnet-proof.md", "docs/mainnet-proof.md", "docs/STATE.md"}
+
+
 def check_snapshot() -> list[str]:
-    return snapshot_problems("docs/security.md", text("docs/security.md"))
+    pages = ["README.md", "SECURITY.md", *[d for d in doc_paths() if d not in SNAPSHOT_EXEMPT]]
+    return [p for page in dict.fromkeys(pages) for p in snapshot_problems(page, text(page))]
 
 
 def check_anchors() -> list[str]:
@@ -356,7 +372,7 @@ CHECKS = [
     ("README lists every contract method", check_interface),
     ("unreleased methods stay out of the docs until their tag", check_unreleased),
     ("README lists every contract event", check_events),
-    ("no dated balance in docs/security.md", check_snapshot),
+    ("no dates in prose outside proof pages", check_snapshot),
     ("README network badge matches the proofs", check_badge),
     ("near-sdk pin is stated in docs/build.md", check_pin),
     ("README pinned build inputs match the toolchain files", check_readme_pin),

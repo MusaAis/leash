@@ -33,7 +33,7 @@ The quote is a 1Click request and has no transaction. The deployed code hash is 
 
 - Quote: 0.1 NEAR in, 378,371 units of USDC out (6 decimals, 0.378371 USDC), minimum 374,587, estimate 24 seconds. The guardian verified every field before approving.
 - Approval: expiry 05:17:07 UTC, 17 minutes; the spend ran at 05:02:58 UTC (block 222,973,632) and consumed it. `get_approvals` read back an empty list.
-- Result: 1Click reported the swap as SUCCESS and delivered 0.37853 USDC on Base (quote: 0.378371, minimum 0.374587). The vault's wNEAR balance on `wrap.near` read `"0"`, so no refund was left in the vault.
+- Result: 1Click returned status SUCCESS and delivered 0.37853 USDC on Base (quote: 0.378371, minimum 0.374587). The vault's wNEAR balance on `wrap.near` read `"0"`, so no refund was left in the vault.
 - On chain: the vault emitted `intent_sent`; `wrap.near` logged the 0.1 NEAR deposit and the transfer of 0.1 wNEAR from the vault to the deposit address. All receipts succeeded. `get_stats` read 1 allowed and 0 denied; `spent_in_window` read 0.1025 NEAR (the amount plus the two storage deposits).
 
 ## Gas, one measured sample
@@ -67,6 +67,6 @@ The first deploy was rejected with a link error ("unknown or invalid import") an
 
 ## Limits of this proof
 
-- One swap, one gas sample. The vault does not wait for settlement; 1Click reported SUCCESS for this swap.
+- One swap, one gas sample. The vault does not wait for settlement; 1Click returned status SUCCESS for this swap.
 - The vault is not locked and the guardian link to the owner's route is checked off-chain, as described in [security](security.md) and [ADR 0005](adr/0005-intents-design-and-trust.md).
 - The recipient of a route is readable on the chain through `get_routes`.

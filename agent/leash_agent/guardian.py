@@ -62,12 +62,9 @@ class StoredRoutes:
 
     def __init__(self, read: Callable[[str, dict], object], expect: Route | None = None) -> None:
         self._read, self._expect = read, expect
-        self._cache: dict[tuple[str, int], Route] = {}
 
     def get(self, agent: str, route_id: int) -> Route:
-        key = (agent, route_id)
-        if key in self._cache:
-            return self._cache[key]
+        """Reads the vault on every call, so a route the owner replaced is never quoted from an old copy."""
         raw = self._read("get_routes", {"agent": agent})
         if not isinstance(raw, list) or not 0 <= route_id < len(raw):
             raise Refused(f"unknown route {route_id}: the vault holds no such route for {agent}")
@@ -78,7 +75,6 @@ class StoredRoutes:
         want = self._expect
         if want is not None and ((want.dest_asset and want.dest_asset != route.dest_asset) or (want.recipient and want.recipient != route.recipient)):
             raise Refused(f"the route in .env differs from route {route_id} stored in the vault; fix .env or run intents-routes")
-        self._cache[key] = route
         return route
 
 

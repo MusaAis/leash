@@ -139,5 +139,25 @@ class LockVaultScript(unittest.TestCase):
         self.assertFalse(self.log.exists())
 
 
+class ConfigAccountNames(unittest.TestCase):
+    def names(self, **env):
+        base = {k: v for k, v in os.environ.items() if k not in ("NETWORK", "LEASH_PREFIX")}
+        out = subprocess.run(
+            ["bash", "-c", 'source scripts/config.sh; echo "$VAULT $OWNER $AGENT $GUARDIAN $PAYEE $ATTACKER $GHOST"'],
+            cwd=ROOT, env={**base, **env}, capture_output=True, text=True, check=True,
+        )
+        return out.stdout.split()
+
+    def test_mainnet_names_end_in_near(self):
+        names = self.names(NETWORK="mainnet", LEASH_PREFIX="leash")
+        self.assertEqual(names[0], "leash-vault.near")
+        self.assertTrue(all(n.endswith(".near") for n in names), names)
+
+    def test_testnet_is_the_default_and_names_end_in_testnet(self):
+        names = self.names(LEASH_PREFIX="demo")
+        self.assertEqual(names[0], "demo-vault.testnet")
+        self.assertTrue(all(n.endswith(".testnet") for n in names), names)
+
+
 if __name__ == "__main__":
     unittest.main()

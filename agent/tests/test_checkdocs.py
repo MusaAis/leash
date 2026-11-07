@@ -23,11 +23,12 @@ class DocsChecks(unittest.TestCase):
     def test_stale_phrases_fail_one_by_one(self):
         for bad in ("not released", "work in progress", "not deployed", "a placeholder", "to be measured", "no LEASH contract",
                     "as reported by the API", "swap (reported)", "reported, not shown", "the owner reports", "the owner's report",
-                    "(the owner's statement)", "it is inferred", "is unverified", "not yet verified", "the rehearsal records"):
+                    "(the owner's statement)", "it is inferred", "is unverified", "not yet verified", "the rehearsal records",
+                    "1Click reported the swap as SUCCESS", "older versions are untested", "an untested path"):
             self.assertTrue(cd.stale_phrases("d.md", bad), bad)
 
     def test_stale_phrases_pass(self):
-        for good in ("1Click reported the swap as SUCCESS.", "Every pending approval is revoked.", "the owner's policy"):
+        for good in ("1Click returned status SUCCESS.", "Every pending approval is revoked.", "the owner's policy"):
             self.assertEqual(cd.stale_phrases("d.md", good), [], good)
 
     def test_private_shapes_fail_one_by_one(self):
@@ -74,6 +75,10 @@ class DocsChecks(unittest.TestCase):
         for bad in ("(guardian 0.080 NEAR, agent 0.250 NEAR on 2026-11-05)", "0.2874 NEAR as of 2026-11-06.", "On 2026-11-06 the vault had 0.29 NEAR.", "The swap ran on 2026-11-04."):
             self.assertTrue(cd.snapshot_problems("s.md", bad), bad)
         self.assertEqual(cd.snapshot_problems("s.md", "See [the table](mainnet-proof.md#2026-11-06) and `2026-11-06`.\n```\n2026-11-06\n```"), [])
+        for bad in ("It ran on 6 November 2026.", "It ran on Nov 6.", "It ran on 6th Nov.", "It ran on 2026/11/06.", "It ran on 06/11/2026.", "Read in Nov. 6, 2026."):
+            self.assertTrue(cd.snapshot_problems("s.md", bad), bad)
+        self.assertEqual(cd.snapshot_problems("s.md", "| Run on | 2026-11-06 |\n|---|---|\nNo date here."), [])
+        self.assertEqual(cd.snapshot_problems("s.md", "The November release adds 3 methods."), [])
         self.assertTrue(cd.stale_phrases("CHANGELOG.md", "moves creation-key files"))
         self.assertEqual(cd.stale_phrases("CHANGELOG.md", "moves full-access key files"), [])
         from unittest import mock

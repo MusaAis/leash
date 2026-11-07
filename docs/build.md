@@ -10,7 +10,7 @@ How to build the vault contract and check the result against the deployed code.
 | `near-sdk` | `=5.28.3`, pinned in `contract/Cargo.toml` and `contract/Cargo.lock` |
 | `cargo-near` | 0.22.0 (recorded; not enforced) |
 
-The mainnet runtime ran protocol version 86 when the vault was deployed on 2026-11-04. The `near-sdk` pin keeps the wasm compatible with it.
+The mainnet runtime ran protocol version 86 when the vault was deployed. The `near-sdk` pin keeps the wasm compatible with it.
 
 ## Build and check
 
@@ -25,10 +25,12 @@ The mainnet runtime ran protocol version 86 when the vault was deployed on 2026-
 | sha256 | `dc3095a72ed04e2c1dddedaeae5e25044d22ca0fe8426e93643efa01d86858f9` |
 | Code hash on chain (base58) | `FpXfPq1ejnsvDVAV3LdRD4RAkGVEPfSAmxecYHPUMq1i` |
 | Host imports | 35 |
+| Vault deployed on mainnet | 2026-11-04 |
+| Builds compared | 2026-11-04 and 2026-11-05 |
 
 The base58 code hash is the same value as the sha256 above, encoded in base58. The mainnet deploy of `leash-vault.near` printed this code hash.
 
-Building the same source with the pinned toolchain gave this sha256 on 2026-11-04 and again on 2026-11-05. `make build-info` prints the value to compare.
+Building the same source with the pinned toolchain gave this sha256 in two builds on separate days. `make build-info` prints the value to compare.
 
 ## Import list
 

@@ -22,7 +22,7 @@ Expected: `intents-dry` ends with `verified: amountIn=... amountOut=... minAmoun
 - Counts every call to 1Click, rejected or failed ones too: at most 10 a minute and 60 an hour, and 6 real quotes an hour with one open at a time. A lock file keeps two processes from passing the same check.
 - Prints nothing private: the recipient and the refund account are hidden in every printed line, in any letter case, error messages included.
 
-## Recorded results (live 1Click mainnet API, dry quotes, 2026-11-01)
+## Recorded results (live 1Click mainnet API, dry quotes)
 
 - A request with the default Python user agent got HTTP 403 (Cloudflare error 1010). The client sends `User-Agent: leash-agent/0.3 (+https://github.com/MusaAis/leash)`.
 - The token list holds exactly one USDC on Base: `nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near` (6 decimals).
@@ -43,13 +43,13 @@ Expected: `intents-dry` ends with `verified: amountIn=... amountOut=... minAmoun
 
 Prices move between calls (two answers for 0.5 NEAR gave 2177761 and 2184717). Every size passed the guardian's checks.
 
-## Two real quotes, never paid (2026-11-01, 0.1 NEAR each)
+## Two real quotes, never paid (0.1 NEAR each)
 
 Observations from two answers, not documented behavior of the service.
 
 - Both answers hold a deposit address that is a 64-character lowercase hex implicit account. The guardian now refuses any other shape for a wet quote (fail closed). The rule is relaxed only by a decision, after another real sample.
-- In both, the quote's `deadline` is exactly 3 days after the deadline we asked for (20 minutes), so the address stays active for 3 days. The echoed `quoteRequest.deadline` equalled the asked one; the guardian refuses a different one, and logs both. The asked deadline is the one the guardian uses for its "one open quote" rule.
-- The platform fee entry in both wet answers has one more key, `limitOrderId`, set to `null`; a dry answer (2026-11-01, 0.1 NEAR) has the entry without that key. The guardian accepts both, and `limitOrderId` only as `null`. The dry answer echoed the asked deadline too.
+- In both, the quote's `deadline` is exactly 3 days after the deadline in the request (20 minutes), so the address stays active for 3 days. The echoed `quoteRequest.deadline` equalled the asked one; the guardian refuses a different one, and logs both. The asked deadline is the one the guardian uses for its "one open quote" rule.
+- The platform fee entry in both wet answers has one more key, `limitOrderId`, set to `null`; a dry answer for 0.1 NEAR has the entry without that key. The guardian accepts both, and `limitOrderId` only as `null`. The dry answer echoed the asked deadline too.
 - 0.1 NEAR gave 0.425652 USDC (minimum 0.421395) in the first and 0.421467 USDC (minimum 0.417252) in the second; estimate 24 seconds, `withdrawFee` 2400 in both. Nothing was deposited. The probe stops after 3 wet quotes in the log.
 
 ## Preparing real payments (written and unit-tested)
@@ -59,7 +59,7 @@ make intents-wet-probe        # one real quote of 0.1 NEAR: prints the deposit a
 make wrap-storage             # read-only: wrap.near storage bounds and the storage balance of the probe's address (ACCOUNT=x.near adds more)
 ```
 
-The probe never deposits. Never send funds to the address it prints. The storage check sends no transaction and holds no key; it reads `LEASH_RPC_URL` (default: a public node from the NEAR docs list). Read on 2026-11-01: the storage deposit of `wrap.near` is 0.00125 NEAR (minimum and maximum are the same). The storage balance of both deposit addresses above was `null` (not registered), so a fresh deposit address is not registered there. The vault's payment batch registers the deposit account first (see [mainnet proof](mainnet-proof.md)).
+The probe never deposits. Never send funds to the address it prints. The storage check sends no transaction and holds no key; it reads `LEASH_RPC_URL` (default: a public node from the NEAR docs list). The storage deposit of `wrap.near` is 0.00125 NEAR (minimum and maximum are the same). The storage balance of both deposit addresses above was `null` (not registered), so a fresh deposit address is not registered there. The vault's payment batch registers the deposit account first (see [mainnet proof](mainnet-proof.md)).
 
 ## Routes are stored on the vault
 
@@ -97,6 +97,14 @@ make intents-status                                # read-only: approvals, stats
 
 ## Limits
 
-- One real swap through the vault has been done on mainnet (0.1 NEAR to USDC on Base, see [mainnet proof](mainnet-proof.md)). 1Click gave no minimum in dry quotes down to 0.001 NEAR and the 0.1 NEAR deposit went through (1Click reported the swap as SUCCESS and delivered 0.37853 USDC on Base); a minimum for smaller sizes at deposit time is untested.
+- One real swap through the vault has been done on mainnet (0.1 NEAR to USDC on Base, see [mainnet proof](mainnet-proof.md)). 1Click gave no minimum in dry quotes down to 0.001 NEAR and the 0.1 NEAR deposit went through (1Click returned status SUCCESS and delivered 0.37853 USDC on Base); no swap below 0.1 NEAR has been paid, so a minimum at deposit time for smaller sizes is not known.
 - The quote signature is not verified.
 - **Testnet run of the success case** (function-call keys only on the machine, full-access key files set aside): `approve_intent` and `spend_intent` for 0.1 NEAR to a test deposit account were both accepted, the vault emitted `intent_approved` and `intent_sent`, and `wrap.testnet` logged the deposit and the transfer. The counter grew by 0.1025 NEAR (amount plus both storage deposits). The vault's available balance fell by 0.09891 NEAR: 0.1 for the swap, 0.00125 for registering the deposit account (the vault was already registered and its deposit was refunded), minus 0.00234 of storage released when the approval was consumed. Transactions: `approve_intent` 4FKPhfKMmADoMkdCEUy43EurmbcSKCRVLCd3JfjDEh2s, `spend_intent` 344BekmvMeNuW8yA2yrEFyxT9WgRkQSBzNjXTRh4aj3F.
+
+## Dates of the recorded reads
+
+| Record | Date |
+|---|---|
+| Dry quotes | 2026-11-01 |
+| Two real quotes, never paid | 2026-11-01 |
+| Storage deposit of `wrap.near` | 2026-11-01 |

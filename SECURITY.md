@@ -20,6 +20,6 @@ Issues in third-party services (1Click, `wrap.near`, NEAR AI Cloud) belong with 
 
 ## Response
 
-Reports are acknowledged within 72 hours. Confirmed issues are fixed in a patch release and listed in the [changelog](CHANGELOG.md).
+The maintainer aims to acknowledge reports within 72 hours. Fixes are made on the latest release, as a patch release, and listed in the [changelog](CHANGELOG.md).
 
 The threat model, the guarantees and the limits are in [docs/security.md](docs/security.md).
