@@ -183,7 +183,7 @@ def contract_part(source: str) -> str:
 
 # Methods in the contract that the docs must not name until the tag below exists.
 UNRELEASED_UNTIL = "v0.3.2"
-UNRELEASED_METHODS: list[str] = ["would_spend", "would_spend_intent"]
+UNRELEASED_METHODS: list[str] = ["would_spend", "would_spend_intent", "get_head_hash"]
 
 
 def contract_methods(source: str) -> list[str]:

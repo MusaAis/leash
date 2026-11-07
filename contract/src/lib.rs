@@ -243,16 +243,38 @@ pub struct PolicyView {
     pub paused: bool,
 }
 
+/// The exact event text that is logged after the `EVENT_JSON:` prefix.
+fn event_payload(event: &str, data: Value) -> String {
+    json!({
+        "standard": "leash",
+        "version": env!("CARGO_PKG_VERSION"),
+        "event": event,
+        "data": [data]
+    })
+    .to_string()
+}
+
 fn emit(event: &str, data: Value) {
-    env::log_str(&format!(
-        "EVENT_JSON:{}",
-        json!({
-            "standard": "leash",
-            "version": env!("CARGO_PKG_VERSION"),
-            "event": event,
-            "data": [data]
-        })
-    ));
+    env::log_str(&format!("EVENT_JSON:{}", event_payload(event, data)));
+}
+
+/// Digest of the previous head followed by one emitted event text.
+fn next_head(prev: &[u8; 32], payload: &str) -> [u8; 32] {
+    let mut input = prev.to_vec();
+    input.extend_from_slice(payload.as_bytes());
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&env::sha256(&input));
+    out
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(DIGITS[(b >> 4) as usize] as char);
+        out.push(DIGITS[(b & 15) as usize] as char);
+    }
+    out
 }
 
 #[near(contract_state)]
@@ -268,6 +290,7 @@ pub struct Leash {
     intents_epoch: u32,
     routes: LookupMap<AccountId, Vec<Route>>,
     approvals: LookupMap<AccountId, Vec<Approval>>,
+    head_hash: [u8; 32],
 }
 
 #[near]
@@ -295,6 +318,7 @@ impl Leash {
             intents_epoch: 0,
             routes: LookupMap::new(StorageKey::Routes),
             approvals: LookupMap::new(StorageKey::Approvals),
+            head_hash: [0u8; 32],
         }
     }
 
@@ -559,18 +583,17 @@ impl Leash {
         let available = self.available_balance_yocto();
         let verdict = self.spend_verdict(&agent, &to, amount, memo_ok, now, available);
         if reached_window_stage(&verdict) {
-            match self.agents.get_mut(&agent) {
-                None => env::panic_str("no policy for caller"),
-                Some(p) => {
-                    if now.saturating_sub(p.window_start_ns) >= DAY_NS {
-                        p.window_start_ns = now;
-                        p.spent_in_window = 0;
-                    }
-                    if verdict.is_ok() {
-                        // The check already proved this sum does not overflow.
-                        p.spent_in_window = p.spent_in_window.saturating_add(amount);
-                    }
-                }
+            let p = self
+                .agents
+                .get_mut(&agent)
+                .unwrap_or_else(|| env::panic_str("no policy for caller"));
+            if now.saturating_sub(p.window_start_ns) >= DAY_NS {
+                p.window_start_ns = now;
+                p.spent_in_window = 0;
+            }
+            if verdict.is_ok() {
+                // The check already proved this sum does not overflow.
+                p.spent_in_window = p.spent_in_window.saturating_add(amount);
             }
         }
         let reason = verdict.err();
@@ -578,7 +601,7 @@ impl Leash {
         match reason {
             Some(r) => {
                 self.denied_total += 1;
-                emit(
+                self.emit_decision(
                     "spend_denied",
                     json!({
                         "agent": agent,
@@ -592,7 +615,7 @@ impl Leash {
             }
             None => {
                 self.allowed_total += 1;
-                emit(
+                self.emit_decision(
                     "spend_allowed",
                     json!({
                         "agent": agent,
@@ -639,7 +662,7 @@ impl Leash {
         let index = match verdict {
             Err(reason) => {
                 self.denied_total += 1;
-                emit(
+                self.emit_decision(
                     "intent_denied",
                     json!({
                         "agent": agent,
@@ -678,7 +701,7 @@ impl Leash {
             }
         }
         self.allowed_total += 1;
-        emit(
+        self.emit_decision(
             "intent_sent",
             json!({
                 "agent": agent,
@@ -843,6 +866,14 @@ impl Leash {
             .unwrap_or_default()
     }
 
+    /// Head of the decision log as 64 lowercase hex characters. It starts at
+    /// 32 zero bytes. Each `spend` and `spend_intent` outcome that returns
+    /// replaces it with the sha256 of the old head followed by the exact
+    /// event text that outcome logged.
+    pub fn get_head_hash(&self) -> String {
+        to_hex(&self.head_hash)
+    }
+
     pub fn is_paused_all(&self) -> bool {
         self.paused_all
     }
@@ -873,6 +904,13 @@ impl Leash {
     }
 
     // ---------- internal ----------
+
+    /// Logs a spend or intent outcome and moves the head over the same text.
+    fn emit_decision(&mut self, event: &str, data: Value) {
+        let payload = event_payload(event, data);
+        self.head_hash = next_head(&self.head_hash, &payload);
+        env::log_str(&format!("EVENT_JSON:{payload}"));
+    }
 
     fn assert_owner(&self) {
         require!(env::predecessor_account_id() == self.owner, "owner only");
@@ -3195,5 +3233,125 @@ mod tests {
         let view = c.would_spend_intent(agent.clone(), 0, deposit_acct(), U128(NEAR));
         assert_eq!(view, "allowed");
         assert!(intent(&mut c, &agent, NEAR, at));
+    }
+
+    // ----- decision log head -----
+
+    const DECISION_EVENTS: [&str; 4] = [
+        "spend_allowed",
+        "spend_denied",
+        "intent_sent",
+        "intent_denied",
+    ];
+
+    fn zero_head() -> [u8; 32] {
+        [0u8; 32]
+    }
+
+    fn decision_lines() -> Vec<String> {
+        get_logs()
+            .iter()
+            .filter_map(|l| l.strip_prefix("EVENT_JSON:"))
+            .filter(|p| {
+                DECISION_EVENTS
+                    .iter()
+                    .any(|e| p.contains(&format!("\"event\":\"{e}\"")))
+            })
+            .map(String::from)
+            .collect()
+    }
+
+    fn fold_head(lines: &[String]) -> String {
+        to_hex(&lines.iter().fold(zero_head(), |h, l| next_head(&h, l)))
+    }
+
+    #[test]
+    fn a_new_vault_starts_at_the_zero_head() {
+        let (c, _o, _a, _t) = setup();
+        assert_eq!(c.get_head_hash(), "0".repeat(64));
+    }
+
+    #[test]
+    fn head_golden_vector() {
+        let text = include_str!("../testdata/chain_golden.json");
+        let golden: Value = near_sdk::serde_json::from_str(text).unwrap();
+        let steps = golden["steps"].as_array().unwrap();
+        let names: Vec<&str> = steps
+            .iter()
+            .map(|s| s["outcome"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, DECISION_EVENTS);
+        let mut head = zero_head();
+        assert_eq!(golden["genesis"], to_hex(&head));
+        for step in steps {
+            head = next_head(&head, step["line"].as_str().unwrap());
+            assert_eq!(step["head"], to_hex(&head));
+        }
+        let bad: Vec<String> = golden["tampered"]["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(golden["tampered"]["head"], fold_head(&bad));
+        assert_ne!(fold_head(&bad), to_hex(&head));
+    }
+
+    #[test]
+    fn an_allowed_spend_moves_the_head_over_its_event_text() {
+        let (mut c, _o, agent, target) = setup();
+        set_ctx(&agent, T0);
+        assert!(c.spend(target, U128(NEAR), None));
+        let lines = decision_lines();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(c.get_head_hash(), fold_head(&lines));
+        assert_ne!(c.get_head_hash(), "0".repeat(64));
+    }
+
+    #[test]
+    fn a_denied_spend_moves_the_head_over_its_event_text() {
+        let (mut c, _o, agent, target) = setup();
+        set_ctx(&agent, T0);
+        assert!(!c.spend(target, U128(3 * NEAR), None));
+        let lines = decision_lines();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("over_per_tx_cap"));
+        assert_eq!(c.get_head_hash(), fold_head(&lines));
+    }
+
+    #[test]
+    fn spend_and_intent_outcomes_extend_one_head_in_order() {
+        let (mut c, _o, agent) = intents_setup();
+        let mut seen: Vec<String> = Vec::new();
+        set_ctx(&agent, T0);
+        assert!(c.spend(accounts(2), U128(NEAR), None));
+        seen.extend(decision_lines());
+        set_ctx(&agent, T0);
+        assert!(!c.spend(accounts(3), U128(NEAR), None));
+        seen.extend(decision_lines());
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        assert!(intent(&mut c, &agent, NEAR, T0));
+        seen.extend(decision_lines());
+        assert!(!intent(&mut c, &agent, NEAR, T0));
+        seen.extend(decision_lines());
+        assert_eq!(seen.len(), 4);
+        assert!(seen[2].contains("intent_sent"));
+        assert!(seen[3].contains("no_approval"));
+        set_ctx(&agent, T0);
+        assert_eq!(c.get_head_hash(), fold_head(&seen));
+    }
+
+    #[test]
+    fn owner_actions_leave_the_head_alone() {
+        let (mut c, owner, agent, target) = setup();
+        set_ctx(&agent, T0);
+        assert!(c.spend(target, U128(NEAR), None));
+        let before = c.get_head_hash();
+        owner_ctx(&owner, T0);
+        c.pause_all();
+        c.resume_all();
+        c.pause_agent(agent.clone());
+        c.resume_agent(agent);
+        assert_eq!(c.get_head_hash(), before);
     }
 }

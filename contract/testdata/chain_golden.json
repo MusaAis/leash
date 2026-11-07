@@ -1,0 +1,35 @@
+{
+  "genesis": "0000000000000000000000000000000000000000000000000000000000000000",
+  "steps": [
+    {
+      "head": "be11dd1c985d5df331d9d4c0eac156d1047c07529de57b378e9ee8ffb1622a9a",
+      "line": "{\"data\":[{\"agent\":\"bob.test\",\"amount\":\"1000000\",\"memo\":\"ok\",\"to\":\"carol.test\"}],\"event\":\"spend_allowed\",\"standard\":\"leash\",\"version\":\"0.2.0\"}",
+      "outcome": "spend_allowed"
+    },
+    {
+      "head": "5bc482b438d4b6eb355731df8a2a89f33dbd82817501c8e9da03216e22b55b99",
+      "line": "{\"data\":[{\"agent\":\"bob.test\",\"amount\":\"3000000\",\"memo\":\"\",\"reason\":\"over_per_tx_cap\",\"to\":\"carol.test\"}],\"event\":\"spend_denied\",\"standard\":\"leash\",\"version\":\"0.2.0\"}",
+      "outcome": "spend_denied"
+    },
+    {
+      "head": "1af73d5acfdfb220e3fce59fe75a900cdd2219f76e1595b764ad7d3e6390ecf0",
+      "line": "{\"data\":[{\"agent\":\"bob.test\",\"amount\":\"1000000\",\"deposit_account\":\"dep.test\",\"quote_hash\":\"abababababababababababababababababababababababababababababababab\",\"route_id\":0}],\"event\":\"intent_sent\",\"standard\":\"leash\",\"version\":\"0.2.0\"}",
+      "outcome": "intent_sent"
+    },
+    {
+      "head": "7558788d2101a7a079741c58bfcfb427c6f68b2d55aac1390007f97f570e33df",
+      "line": "{\"data\":[{\"agent\":\"bob.test\",\"amount\":\"2000000\",\"deposit_account\":\"dep.test\",\"reason\":\"no_approval\",\"route_id\":0}],\"event\":\"intent_denied\",\"standard\":\"leash\",\"version\":\"0.2.0\"}",
+      "outcome": "intent_denied"
+    }
+  ],
+  "tampered": {
+    "head": "e20d738e0a9491c7a21595cb0fedb6312f82351d647228174c84267387f0ab61",
+    "index": 1,
+    "lines": [
+      "{\"data\":[{\"agent\":\"bob.test\",\"amount\":\"1000000\",\"memo\":\"ok\",\"to\":\"carol.test\"}],\"event\":\"spend_allowed\",\"standard\":\"leash\",\"version\":\"0.2.0\"}",
+      "{\"data\":[{\"agent\":\"bob.test\",\"amount\":\"3000000\",\"memo\":\"\",\"reason\":\"zero_amount\",\"to\":\"carol.test\"}],\"event\":\"spend_denied\",\"standard\":\"leash\",\"version\":\"0.2.0\"}",
+      "{\"data\":[{\"agent\":\"bob.test\",\"amount\":\"1000000\",\"deposit_account\":\"dep.test\",\"quote_hash\":\"abababababababababababababababababababababababababababababababab\",\"route_id\":0}],\"event\":\"intent_sent\",\"standard\":\"leash\",\"version\":\"0.2.0\"}",
+      "{\"data\":[{\"agent\":\"bob.test\",\"amount\":\"2000000\",\"deposit_account\":\"dep.test\",\"reason\":\"no_approval\",\"route_id\":0}],\"event\":\"intent_denied\",\"standard\":\"leash\",\"version\":\"0.2.0\"}"
+    ]
+  }
+}
