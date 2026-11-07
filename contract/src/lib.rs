@@ -2905,4 +2905,200 @@ mod tests {
         assert_eq!(before, after);
         assert!(get_logs().is_empty());
     }
+
+    fn window_of(c: &Leash, agent: &AccountId) -> (u64, u128) {
+        let p = c.agents.get(agent).expect("policy");
+        (p.window_start_ns, p.spent_in_window)
+    }
+
+    #[test]
+    fn spend_check_order_follows_the_decided_sequence() {
+        let target = accounts(2);
+        let other = accounts(3);
+        let list = vec![target.clone()];
+        let mut s = SpendCheck {
+            all_paused: true,
+            memo_ok: false,
+            agent_paused: true,
+            per_tx_cap: NEAR,
+            daily_cap: 2 * NEAR,
+            window_start_ns: T0,
+            spent_in_window: 2 * NEAR,
+            allowlist: &list,
+            now: T0,
+            available: 0,
+        };
+        assert_eq!(check_spend(&s, &other, 0), Err("all_paused"));
+        s.all_paused = false;
+        assert_eq!(check_spend(&s, &other, 0), Err("memo_too_long"));
+        s.memo_ok = true;
+        assert_eq!(check_spend(&s, &other, 0), Err("agent_paused"));
+        s.agent_paused = false;
+        assert_eq!(check_spend(&s, &other, 0), Err("zero_amount"));
+        assert_eq!(check_spend(&s, &other, 2 * NEAR), Err("over_per_tx_cap"));
+        assert_eq!(check_spend(&s, &other, NEAR), Err("not_allowlisted"));
+        assert_eq!(check_spend(&s, &target, NEAR), Err("over_daily_cap"));
+        s.spent_in_window = 0;
+        assert_eq!(check_spend(&s, &target, NEAR), Err("insufficient_funds"));
+        s.available = NEAR;
+        assert_eq!(check_spend(&s, &target, NEAR), Ok(()));
+        s.available = NEAR - 1;
+        assert_eq!(check_spend(&s, &target, NEAR), Err("insufficient_funds"));
+    }
+
+    #[test]
+    #[should_panic(expected = "no policy for caller")]
+    fn spend_without_a_policy_reverts_while_all_paused() {
+        let (mut c, owner, _a, t) = setup();
+        owner_ctx(&owner, T0);
+        c.pause_all();
+        set_ctx(&accounts(4), T0);
+        c.spend(t, U128(NEAR), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "no policy for caller")]
+    fn spend_without_a_policy_reverts_with_an_oversize_memo() {
+        let (mut c, _o, _a, t) = setup();
+        set_ctx(&accounts(4), T0);
+        c.spend(t, U128(NEAR), Some("x".repeat(MAX_MEMO_BYTES + 1)));
+    }
+
+    #[test]
+    fn spend_without_a_policy_leaves_the_counters_alone() {
+        let (mut c, owner, _a, t) = setup();
+        owner_ctx(&owner, T0);
+        c.pause_all();
+        let before = c.get_stats();
+        set_ctx(&accounts(4), T0);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.spend(t.clone(), U128(NEAR), None)
+        }));
+        assert!(r.is_err());
+        let after = c.get_stats();
+        assert_eq!((before.0 .0, before.1 .0), (after.0 .0, after.1 .0));
+    }
+
+    #[test]
+    fn views_return_no_policy_for_an_outsider() {
+        fresh_storage();
+        let (mut c, owner, _a) = intents_setup();
+        owner_ctx(&owner, T0);
+        c.pause_all();
+        set_ctx(&accounts(4), T0);
+        let big = Some("x".repeat(MAX_MEMO_BYTES + 1));
+        assert_eq!(c.would_spend(accounts(4), accounts(2), U128(NEAR), big), "no_policy");
+        assert_eq!(c.would_spend(accounts(4), accounts(2), U128(NEAR), None), "no_policy");
+        assert_eq!(
+            c.would_spend_intent(accounts(4), 0, deposit_acct(), U128(NEAR)),
+            "no_policy"
+        );
+    }
+
+    #[test]
+    fn memo_byte_limit_is_the_same_for_the_view_and_the_method() {
+        let t = accounts(2);
+        spend_view_matches(no_prep, t.clone(), NEAR, Some("x".repeat(MAX_MEMO_BYTES)), "allowed");
+        spend_view_matches(
+            no_prep,
+            t.clone(),
+            NEAR,
+            Some("é".repeat(MAX_MEMO_BYTES / 2)),
+            "allowed",
+        );
+        spend_view_matches(
+            no_prep,
+            t.clone(),
+            NEAR,
+            Some("é".repeat(MAX_MEMO_BYTES / 2 + 1)),
+            "memo_too_long",
+        );
+        spend_view_matches(no_prep, t, NEAR, Some(String::new()), "allowed");
+    }
+
+    #[test]
+    fn rollover_then_insufficient_funds_restarts_the_window_but_the_view_does_not() {
+        let (mut c, owner, agent, target) = setup();
+        owner_ctx(&owner, T0);
+        c.set_policy(agent.clone(), U128(1_000 * NEAR), U128(2_000 * NEAR), vec![target.clone()]);
+        set_ctx(&agent, T0);
+        assert!(c.spend(target.clone(), U128(NEAR), None));
+        let before = window_of(&c, &agent);
+        assert_eq!(before.1, NEAR);
+        let later = T0 + DAY_NS + 5;
+        set_ctx(&agent, later);
+        let seen = c.would_spend(agent.clone(), target.clone(), U128(1_000 * NEAR), None);
+        assert_eq!(seen, "insufficient_funds");
+        assert_eq!(window_of(&c, &agent), before, "the view must not touch the window");
+        assert!(!c.spend(target, U128(1_000 * NEAR), None));
+        assert!(denied_with("insufficient_funds"));
+        assert_eq!(window_of(&c, &agent), (later, 0), "the real call restarts the window");
+    }
+
+    #[test]
+    fn rollover_then_allowed_sums_from_zero() {
+        let (mut c, _o, agent, target) = setup();
+        set_ctx(&agent, T0);
+        assert!(c.spend(target.clone(), U128(2 * NEAR), None));
+        let later = T0 + DAY_NS;
+        set_ctx(&agent, later);
+        assert!(c.spend(target, U128(NEAR), None));
+        assert_eq!(window_of(&c, &agent), (later, NEAR));
+    }
+
+    #[test]
+    fn a_pause_denial_does_not_restart_an_expired_window() {
+        let (mut c, owner, agent, target) = setup();
+        set_ctx(&agent, T0);
+        assert!(c.spend(target.clone(), U128(NEAR), None));
+        let before = window_of(&c, &agent);
+        owner_ctx(&owner, T0);
+        c.pause_agent(agent.clone());
+        set_ctx(&agent, T0 + 3 * DAY_NS);
+        assert!(!c.spend(target, U128(NEAR), None));
+        assert!(denied_with("agent_paused"));
+        assert_eq!(window_of(&c, &agent), before);
+    }
+
+    fn intent_outcome(c: &mut Leash, agent: &AccountId, at: u64, amount: u128) -> (String, String) {
+        set_ctx(agent, at);
+        let seen = c.would_spend_intent(agent.clone(), 0, deposit_acct(), U128(amount));
+        gas_ctx(agent, at, 0, 200);
+        let real = if c.spend_intent(0, deposit_acct(), U128(amount)) {
+            "allowed".to_string()
+        } else {
+            last_reason("intent_denied")
+        };
+        (seen, real)
+    }
+
+    #[test]
+    fn would_spend_intent_matches_for_expired_old_epoch_and_wrong_amount_approvals() {
+        fresh_storage();
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        let (seen, real) = intent_outcome(&mut c, &agent, T0 + 11 * MIN_NS, NEAR);
+        assert_eq!((seen.as_str(), real.as_str()), ("no_approval", "no_approval"));
+
+        fresh_storage();
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        let (seen, real) = intent_outcome(&mut c, &agent, T0 + 10 * MIN_NS, NEAR);
+        assert_eq!(seen, real, "at the instant of expiry");
+        assert_eq!(seen, "no_approval");
+
+        fresh_storage();
+        let (mut c, owner, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        owner_ctx(&owner, T0);
+        c.set_intents_config(wnear(), guardian());
+        let (seen, real) = intent_outcome(&mut c, &agent, T0, NEAR);
+        assert_eq!((seen.as_str(), real.as_str()), ("no_approval", "no_approval"));
+
+        fresh_storage();
+        let (mut c, _o, agent) = intents_setup();
+        approve(&mut c, &agent, NEAR, T0 + 10 * MIN_NS);
+        let (seen, real) = intent_outcome(&mut c, &agent, T0, NEAR + 1);
+        assert_eq!((seen.as_str(), real.as_str()), ("no_approval", "no_approval"));
+    }
 }

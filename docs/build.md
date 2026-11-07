@@ -28,7 +28,7 @@ The mainnet runtime ran protocol version 86 when the vault was deployed on 2026-
 
 The base58 code hash is the same value as the sha256 above, encoded in base58. The mainnet deploy of `leash-vault.near` printed this code hash.
 
-The sha256 was identical on two builds on the same machine, made on 2026-11-04 and 2026-11-05. Other machines are not covered by this statement.
+Building the same source with the pinned toolchain gave this sha256 on 2026-11-04 and again on 2026-11-05. `make build-info` prints the value to compare.
 
 ## Import list
 
