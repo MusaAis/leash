@@ -36,7 +36,7 @@ for id in "$VAULT" "$OWNER" "$AGENT" "$GUARDIAN" "$PAYEE" "$ATTACKER"; do
     done
     echo "Creating $id (attempt $attempt of 5)"
     if near account create-account sponsor-by-faucet-service "$id" \
-        autogenerate-new-keypair save-to-legacy-keychain \
+        autogenerate-new-keypair --signature-scheme ed25519 save-to-legacy-keychain \
         network-config "$NETWORK" create; then
       created=yes
       break

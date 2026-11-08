@@ -177,5 +177,11 @@ class ConfigAccountNames(unittest.TestCase):
         self.assertTrue(all(n.endswith(".testnet") for n in names), names)
 
 
+class AccountScriptKeyScheme(unittest.TestCase):
+    def test_account_creation_names_the_signature_scheme(self):
+        text = (ROOT / "scripts" / "accounts-testnet.sh").read_text()
+        self.assertIn("autogenerate-new-keypair --signature-scheme ed25519 save-to-legacy-keychain", text)
+
+
 if __name__ == "__main__":
     unittest.main()
