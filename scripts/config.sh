@@ -5,7 +5,11 @@
 NETWORK="${NETWORK:-testnet}"
 PREFIX="${LEASH_PREFIX:-leashdemo}"
 # Account ids end in `.near` on mainnet and in the network name elsewhere.
-case "$NETWORK" in mainnet) SUFFIX="near" ;; *) SUFFIX="$NETWORK" ;; esac
+case "$NETWORK" in
+  testnet) SUFFIX="testnet" ;;
+  mainnet) SUFFIX="near" ;;
+  *) echo "NETWORK must be testnet or mainnet (got: $NETWORK)." >&2; exit 1 ;;
+esac
 VAULT="${PREFIX}-vault.${SUFFIX}"
 OWNER="${PREFIX}-owner.${SUFFIX}"
 AGENT="${PREFIX}-agent.${SUFFIX}"

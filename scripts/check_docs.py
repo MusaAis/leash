@@ -249,6 +249,11 @@ DATE_SHAPES = [
     r"\b\d\d?/\d\d?/20\d\d\b",
     r"\b" + MONTHS + r" \d{1,2}(?:st|nd|rd|th)?(?:,? 20\d\d)?\b",
     r"\b\d{1,2}(?:st|nd|rd|th)? " + MONTHS + r"(?: 20\d\d)?\b",
+    r"\b" + MONTHS + r" 20\d\d\b",
+    r"\b20\d\d\.\d\d\.\d\d\b",
+    r"\b\d\d\.\d\d\.20\d\d\b",
+    r"\b\d\d-\d\d-20\d\d\b",
+    r"\b20\d\d(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\b",
 ]
 
 

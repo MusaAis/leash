@@ -3284,7 +3284,10 @@ mod tests {
         let mut head = zero_head();
         assert_eq!(golden["genesis"], to_hex(&head));
         for step in steps {
-            head = next_head(&head, step["line"].as_str().unwrap());
+            let name = step["outcome"].as_str().unwrap();
+            let line = event_payload(name, step["data"].clone());
+            assert_eq!(step["line"], line);
+            head = next_head(&head, &line);
             assert_eq!(step["head"], to_hex(&head));
         }
         let bad: Vec<String> = golden["tampered"]["lines"]

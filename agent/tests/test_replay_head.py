@@ -84,6 +84,27 @@ class ReplayHeadTests(unittest.TestCase):
             usage = subprocess.run([sys.executable, SCRIPT], capture_output=True, text=True)
             self.assertEqual(usage.returncode, 2)
 
+    def test_a_missing_or_non_utf8_file_is_an_error_not_a_broken_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = os.path.join(tmp, "none.txt")
+            result = subprocess.run([sys.executable, SCRIPT, missing, "0" * 64], capture_output=True, text=True)
+            self.assertEqual((result.stdout, result.returncode), ("", 3))
+            self.assertTrue(result.stderr.startswith("chain ERROR"))
+            binary = os.path.join(tmp, "binary.txt")
+            with open(binary, "wb") as handle:
+                handle.write(b"\xff\xfe\x00bad\n")
+            result = subprocess.run([sys.executable, SCRIPT, binary, "0" * 64], capture_output=True, text=True)
+            self.assertEqual((result.stdout, result.returncode), ("", 3))
+            self.assertTrue(result.stderr.startswith("chain ERROR"))
+
+    def test_golden_lines_have_the_shape_the_contract_logs(self):
+        version = gen_chain_golden.contract_version()
+        for row in load()["steps"]:
+            start = '{"standard":"leash","version":"%s","event":"%s","data":[{' % (version, row["outcome"])
+            self.assertTrue(row["line"].startswith(start), row["line"])
+            self.assertTrue(row["line"].endswith("}]}"))
+            self.assertEqual(row["line"], gen_chain_golden.event(row["outcome"], row["data"]))
+
 
 if __name__ == "__main__":
     unittest.main()

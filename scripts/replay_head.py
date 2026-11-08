@@ -2,9 +2,15 @@
 """Replays logged decision events against the head the vault reports.
 
 Usage: replay_head.py EVENTS_FILE HEAD_HEX
-Each line is one event as the vault logged it, with or without the
-EVENT_JSON: prefix, in the order the vault logged them. Lines are hashed
-exactly as written. Prints "chain OK" or "chain BROKEN".
+
+Input: the decision events of the receipts that succeeded, in block order,
+one event per line, LF line endings, UTF-8 without a byte order mark. A line
+may carry the EVENT_JSON: prefix. A failed receipt can leave a log line
+behind while its head change is reverted, so such a line must not be in the
+file; replaying it prints "chain BROKEN". Lines are hashed exactly as written.
+
+Output: "chain OK" or "chain BROKEN".
+Exit code: 0 OK, 1 BROKEN, 2 usage, 3 the file cannot be read.
 """
 import hashlib
 import re
@@ -41,8 +47,12 @@ def main(argv: list[str]) -> int:
     if len(argv) != 3:
         print("usage: replay_head.py EVENTS_FILE HEAD_HEX", file=sys.stderr)
         return 2
-    with open(argv[1], encoding="utf-8", newline="") as handle:
-        lines = split_lines(handle.read())
+    try:
+        with open(argv[1], encoding="utf-8", newline="") as handle:
+            lines = split_lines(handle.read())
+    except (OSError, UnicodeDecodeError) as error:
+        print(f"chain ERROR: cannot read the events file ({type(error).__name__})", file=sys.stderr)
+        return 3
     ok = verify(lines, argv[2])
     print("chain OK" if ok else "chain BROKEN")
     return 0 if ok else 1

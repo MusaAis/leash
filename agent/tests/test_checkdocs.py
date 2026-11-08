@@ -75,10 +75,12 @@ class DocsChecks(unittest.TestCase):
         for bad in ("(guardian 0.080 NEAR, agent 0.250 NEAR on 2026-11-05)", "0.2874 NEAR as of 2026-11-06.", "On 2026-11-06 the vault had 0.29 NEAR.", "The swap ran on 2026-11-04."):
             self.assertTrue(cd.snapshot_problems("s.md", bad), bad)
         self.assertEqual(cd.snapshot_problems("s.md", "See [the table](mainnet-proof.md#2026-11-06) and `2026-11-06`.\n```\n2026-11-06\n```"), [])
-        for bad in ("It ran on 6 November 2026.", "It ran on Nov 6.", "It ran on 6th Nov.", "It ran on 2026/11/06.", "It ran on 06/11/2026.", "Read in Nov. 6, 2026."):
+        for bad in ("It ran on 6 November 2026.", "It ran on Nov 6.", "It ran on 6th Nov.", "It ran on 2026/11/06.", "It ran on 06/11/2026.", "Read in Nov. 6, 2026.",
+                    "As of November 2026.", "Since Nov 2026.", "Run 2026.11.04.", "Run 04.11.2026.", "Run 04-11-2026.", "Run 20261104."):
             self.assertTrue(cd.snapshot_problems("s.md", bad), bad)
         self.assertEqual(cd.snapshot_problems("s.md", "| Run on | 2026-11-06 |\n|---|---|\nNo date here."), [])
         self.assertEqual(cd.snapshot_problems("s.md", "The November release adds 3 methods."), [])
+        self.assertEqual(cd.snapshot_problems("s.md", "Gas 20000000 and version 2.6.0 and 1.96.0."), [])
         self.assertTrue(cd.stale_phrases("CHANGELOG.md", "moves creation-key files"))
         self.assertEqual(cd.stale_phrases("CHANGELOG.md", "moves full-access key files"), [])
         from unittest import mock

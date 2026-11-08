@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Writes contract/testdata/chain_golden.json from synthetic event lines.
+"""Writes contract/testdata/chain_golden.json from synthetic event data.
 
-The file is generated, never edited by hand. Run without arguments to
-rewrite it; `build()` returns the same data for comparison in tests.
+Lines have the shape the contract logs: standard, version, event, data, with
+the data fields in the order the contract writes them. The version comes from
+contract/Cargo.toml. The file is generated, never edited by hand. Run without
+arguments to rewrite it; `build()` returns the same data for comparison.
 """
 import hashlib
 import json
 import os
+import re
 import sys
 
 GENESIS = bytes(32)
 QUOTE_HASH = "ab" * 32
-VERSION = "0.2.0"
 OUTPUT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "..",
@@ -21,9 +23,20 @@ OUTPUT = os.path.join(
 )
 
 
+CARGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "contract", "Cargo.toml")
+
+
+def contract_version() -> str:
+    with open(CARGO, encoding="utf-8") as handle:
+        match = re.search(r'^version = "([^"]+)"', handle.read(), re.M)
+    if not match:
+        raise SystemExit("no version in contract/Cargo.toml")
+    return match.group(1)
+
+
 def event(name: str, data: dict) -> str:
-    body = {"data": [data], "event": name, "standard": "leash", "version": VERSION}
-    return json.dumps(body, sort_keys=True, separators=(",", ":"))
+    body = {"standard": "leash", "version": contract_version(), "event": name, "data": [data]}
+    return json.dumps(body, separators=(",", ":"))
 
 
 def head_after(lines: list[str]) -> str:
@@ -35,16 +48,21 @@ def head_after(lines: list[str]) -> str:
 
 def build() -> dict:
     steps = [
-        ("spend_allowed", {"agent": "bob.test", "amount": "1000000", "memo": "ok", "to": "carol.test"}),
-        ("spend_denied", {"agent": "bob.test", "amount": "3000000", "memo": "", "reason": "over_per_tx_cap", "to": "carol.test"}),
-        ("intent_sent", {"agent": "bob.test", "amount": "1000000", "deposit_account": "dep.test", "quote_hash": QUOTE_HASH, "route_id": 0}),
-        ("intent_denied", {"agent": "bob.test", "amount": "2000000", "deposit_account": "dep.test", "reason": "no_approval", "route_id": 0}),
+        ("spend_allowed", {"agent": "bob.test", "to": "carol.test", "amount": "1000000", "memo": "ok"}),
+        ("spend_denied", {"agent": "bob.test", "to": "carol.test", "amount": "3000000", "reason": "over_per_tx_cap", "memo": ""}),
+        ("intent_sent", {"agent": "bob.test", "route_id": 0, "deposit_account": "dep.test", "amount": "1000000", "quote_hash": QUOTE_HASH}),
+        ("intent_denied", {"agent": "bob.test", "route_id": 0, "deposit_account": "dep.test", "amount": "2000000", "reason": "no_approval"}),
     ]
     lines = [event(name, data) for name, data in steps]
     rows = []
-    for index, (name, _) in enumerate(steps):
+    for index, (name, data) in enumerate(steps):
         rows.append(
-            {"outcome": name, "line": lines[index], "head": head_after(lines[: index + 1])}
+            {
+                "outcome": name,
+                "data": data,
+                "line": lines[index],
+                "head": head_after(lines[: index + 1]),
+            }
         )
     tampered = list(lines)
     tampered[1] = tampered[1].replace("over_per_tx_cap", "zero_amount")
@@ -57,7 +75,7 @@ def build() -> dict:
 
 def main() -> int:
     with open(OUTPUT, "w", encoding="utf-8") as handle:
-        json.dump(build(), handle, indent=2, sort_keys=True)
+        json.dump(build(), handle, indent=2)
         handle.write("\n")
     return 0
 

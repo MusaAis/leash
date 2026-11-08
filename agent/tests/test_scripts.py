@@ -153,6 +153,24 @@ class ConfigAccountNames(unittest.TestCase):
         self.assertEqual(names[0], "leash-vault.near")
         self.assertTrue(all(n.endswith(".near") for n in names), names)
 
+    def test_an_unknown_network_is_refused(self):
+        out = subprocess.run(
+            ["bash", "-c", "source scripts/config.sh; echo reached"],
+            cwd=ROOT, env={**os.environ, "NETWORK": "foo"}, capture_output=True, text=True,
+        )
+        self.assertNotEqual(out.returncode, 0)
+        self.assertNotIn("reached", out.stdout)
+        self.assertIn("NETWORK must be testnet or mainnet", out.stderr)
+
+    def test_testnet_scripts_refuse_mainnet_even_with_the_mainnet_flag(self):
+        for script in ("accounts-testnet.sh", "deploy-testnet.sh", "demo-testnet.sh", "policy-testnet.sh"):
+            for flag in ({}, {"LEASH_ALLOW_MAINNET": "1"}):
+                env = {**os.environ, "NETWORK": "mainnet", "LEASH_PREFIX": "leash", **flag}
+                out = subprocess.run(["bash", "scripts/" + script], cwd=ROOT, env=env, capture_output=True, text=True)
+                with self.subTest(script=script, flag=bool(flag)):
+                    self.assertEqual(out.returncode, 1)
+                    self.assertIn("testnet only", out.stderr)
+
     def test_testnet_is_the_default_and_names_end_in_testnet(self):
         names = self.names(LEASH_PREFIX="demo")
         self.assertEqual(names[0], "demo-vault.testnet")
