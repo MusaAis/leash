@@ -36,6 +36,9 @@ deploy-testnet: build
 demo-testnet:
 	scripts/demo-testnet.sh
 
+chain-check-testnet:
+	scripts/chain-check-testnet.sh $(LOG)
+
 lock-vault-testnet:
 	scripts/lock-vault.sh
 
