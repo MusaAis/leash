@@ -127,11 +127,15 @@ class DocsChecks(unittest.TestCase):
     def test_readme_pin_row(self):
         cargo = 'near-sdk = "=5.28.3"\n[dev-dependencies]\nnear-sdk = { version = "=5.28.3", features = ["x"] }\n'
         tool = '[toolchain]\nchannel = "1.96.0"\n'
-        row = "| Pinned build inputs | Rust 1.96.0 and near-sdk =5.28.3, see docs |"
+        badges = "badge/Rust-1.96.0-orange badge/near--sdk-%3D5.28.3-blue "
+        row = badges + "| Pinned build inputs | Rust 1.96.0 and near-sdk =5.28.3, see docs |"
         self.assertEqual(cd.readme_pin_problems(row, cargo, tool), [])
         self.assertEqual(len(cd.readme_pin_problems("no row", cargo, tool)), 1)
-        self.assertEqual(len(cd.readme_pin_problems(row.replace("1.96.0", "1.95.0"), cargo, tool)), 1)
-        self.assertEqual(len(cd.readme_pin_problems(row.replace("5.28.3", "5.30.0"), cargo, tool)), 1)
+        self.assertEqual(len(cd.readme_pin_problems(row.replace("1.96.0", "1.95.0"), cargo, tool)), 2)
+        self.assertEqual(len(cd.readme_pin_problems(row.replace("5.28.3", "5.30.0"), cargo, tool)), 2)
+        self.assertEqual(len(cd.readme_pin_problems(row.replace("badge/Rust-1.96.0-orange", ""), cargo, tool)), 1)
+        self.assertEqual(len(cd.readme_pin_problems(row.replace("badge/near--sdk-%3D5.28.3-blue", ""), cargo, tool)), 1)
+        self.assertEqual(len(cd.readme_pin_problems(row.replace("Rust-1.96.0-orange", "Rust-1.95.0-orange"), cargo, tool)), 1)
 
 
 if __name__ == "__main__":

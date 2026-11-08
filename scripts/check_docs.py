@@ -74,6 +74,7 @@ def check_test_counts() -> list[str]:
     claims = [
         ("README.md", r"Agent unit tests \| (\d+) passed", agent), ("README.md", r"Ran (\d+) tests", agent),
         ("docs/STATE.md", r"(\d+) agent tests", agent),
+        ("README.md", r"badge/agent%20tests-(\d+)%20passed", agent), ("README.md", r"badge/contract%20tests-(\d+)%20passed", contract),
         ("README.md", r"Contract unit tests \| (\d+) passed", contract),
         ("README.md", r"test result: ok\. (\d+) passed", contract), ("docs/STATE.md", r"(\d+) contract tests", contract),
     ]
@@ -333,6 +334,15 @@ def readme_pin_problems(readme: str, cargo_toml: str, toolchain_toml: str) -> li
         problems.append(f"README says Rust {row.group(1)}, rust-toolchain.toml has {channel and channel.group(1)}")
     if pins != {row.group(2)}:
         problems.append(f"README says near-sdk ={row.group(2)}, Cargo.toml pins {sorted(pins)}")
+    for label, pattern, expected in (
+        ("Rust", r"badge/Rust-(\d+\.\d+\.\d+)-", channel and channel.group(1)),
+        ("near-sdk", r"badge/near--sdk-%3D(\d+\.\d+\.\d+)-", next(iter(pins)) if len(pins) == 1 else None),
+    ):
+        badge = re.search(pattern, readme)
+        if not badge:
+            problems.append(f"README has no {label} version badge at the top")
+        elif badge.group(1) != expected:
+            problems.append(f"README {label} badge says {badge.group(1)}, the pin is {expected}")
     return problems
 
 
