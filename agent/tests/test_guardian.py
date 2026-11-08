@@ -1,5 +1,6 @@
 import datetime
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,12 +8,17 @@ from unittest import mock
 
 from leash_agent import __main__ as cli
 from leash_agent.chain import Snapshot
-from leash_agent.guardian import INTENT_OVERHEAD, EnvRoutes, Guardian, GuardianLog, Refused, Route, StoredRoutes, intent_denial
+from leash_agent.chain import ChainError
+from leash_agent.guardian import (
+    DAY_NS, INTENT_OVERHEAD, PROBE_DEPOSIT, STORAGE_DEPOSIT, EnvRoutes, Guardian, GuardianLog, Refused, Route, StoredRoutes,
+    budget_denial, intent_precheck, vault_denial,
+)
 from leash_agent.intents import IntentsError, QuoteRejected, parse_iso
 from tests.test_chain import make_config
 from tests.test_intents import ASSET, DEPOSIT, NOW
 
 NEAR = 10**24
+NOW_NS = 1_800_000_000 * 10**9
 
 
 def snap(**over):
@@ -20,6 +26,18 @@ def snap(**over):
                 agent_paused=False, all_paused=False, balance=5 * NEAR)
     base.update(over)
     return Snapshot(**base)
+
+
+def fake_check(state, args):
+    """What the vault's check view answers before an approval exists: reasons 1 to 6, else `no_approval`."""
+    if state.all_paused:
+        return "all_paused"
+    if state.agent_paused:
+        return "agent_paused"
+    amount = int(args["amount"])
+    if amount == 0:
+        return "zero_amount"
+    return "over_per_tx_cap" if amount > state.per_tx_cap else "no_approval"
 
 
 class FakeOneClick:
@@ -62,6 +80,7 @@ class GuardianTests(unittest.TestCase):
     def make(self, oneclick=None, **kw):
         self.oneclick = oneclick or FakeOneClick()
         return Guardian(agent="a.near", vault_account="v.near", snapshot=lambda: self.snapshot,
+                        view=lambda method, args: fake_check(self.snapshot, args),
                         routes=EnvRoutes(ASSET, "0xRecipient"), oneclick=self.oneclick, log=self.log,
                         other_accounts=("owner.near", "guardian.near"), now=self.clock, sleep=lambda s: None, **kw)
 
@@ -99,26 +118,70 @@ class GuardianTests(unittest.TestCase):
             self.assertEqual(guardian.oneclick.quotes, [], reason)
         self.assertTrue(all(e["event"] == "refused" for e in self.log.entries()))
 
-    def test_denial_order_matches_the_contract(self):
-        self.assertEqual(intent_denial(snap(all_paused=True, agent_paused=True), 10 * NEAR), "all_paused")
-        self.assertEqual(intent_denial(snap(agent_paused=True), 10 * NEAR), "agent_paused")
-        self.assertEqual(intent_denial(snap(), 10 * NEAR), "over_per_tx_cap")
-        self.assertEqual(intent_denial(snap(spent=3 * NEAR), NEAR), "over_daily_cap")
-        self.assertEqual(intent_denial(snap(balance=0), NEAR), "insufficient_funds")
-        self.assertIsNone(intent_denial(snap(), NEAR))
+    def test_the_view_decides_the_first_reasons_and_the_guardian_the_budget(self):
+        view = lambda state: (lambda method, args: fake_check(state, args))
+        for state, amount, reason in (
+            (snap(all_paused=True, agent_paused=True), 10 * NEAR, "all_paused"), (snap(agent_paused=True), 10 * NEAR, "agent_paused"),
+            (snap(), 10 * NEAR, "over_per_tx_cap"), (snap(spent=3 * NEAR), NEAR, "over_daily_cap"),
+            (snap(balance=0), NEAR, "insufficient_funds"), (snap(), NEAR, None),
+        ):
+            self.assertEqual(intent_precheck(view(state), lambda: state, "a.near", 0, amount, NOW_NS), reason, reason)
 
-    def test_mirror_counts_the_storage_overhead_in_the_daily_check(self):
+    def test_the_view_is_asked_with_the_probe_account_and_the_route(self):
+        seen = []
+        vault_denial(lambda method, args: seen.append((method, args)) or "no_approval", "a.near", 3, 7)
+        self.assertEqual(seen, [("would_spend_intent", {"agent": "a.near", "route_id": 3, "deposit_account": PROBE_DEPOSIT, "amount": "7"})])
+        self.assertRegex(PROBE_DEPOSIT, "^[0-9a-f]{64}$")
+
+    def test_a_view_answer_that_is_not_known_or_not_readable_refuses(self):
+        for answer in ("allowed", "no_approval"):
+            self.assertIsNone(vault_denial(lambda m, a, r=answer: r, "a.near", 0, 1))
+        for answer in ("all_paused", "unknown_route", "no_policy", "intents_not_configured"):
+            self.assertEqual(vault_denial(lambda m, a, r=answer: r, "a.near", 0, 1), answer)
+        for answer in ("", "ALLOWED", "no_approval ", "something_new", None, 5, [], {}, True):
+            with self.assertRaises(Refused, msg=repr(answer)):
+                vault_denial(lambda m, a, r=answer: r, "a.near", 0, 1)
+
+        def broken(method, args):
+            raise ChainError("near CLI timed out")
+
+        with self.assertRaisesRegex(Refused, "could not be read"):
+            vault_denial(broken, "a.near", 0, 1)
+        state = snap()
+        guardian = self.make()
+        guardian._view = broken
+        with self.assertRaises(Refused):
+            guardian.quote(0, NEAR // 2)
+        self.assertEqual((guardian.oneclick.quotes, state), ([], snap()))
+
+    def test_the_budget_counts_the_storage_overhead_in_the_daily_check(self):
         edge = 3 * NEAR - NEAR - INTENT_OVERHEAD  # spent + amount + overhead == daily cap
-        self.assertIsNone(intent_denial(snap(spent=edge), NEAR))
-        self.assertEqual(intent_denial(snap(spent=edge + 1), NEAR), "over_daily_cap")
-        self.assertEqual(intent_denial(snap(per_tx_cap=3 * NEAR), 3 * NEAR), "over_daily_cap")
+        self.assertIsNone(budget_denial(snap(spent=edge), NEAR, NOW_NS))
+        self.assertEqual(budget_denial(snap(spent=edge + 1), NEAR, NOW_NS), "over_daily_cap")
+        self.assertEqual(budget_denial(snap(per_tx_cap=3 * NEAR), 3 * NEAR, NOW_NS), "over_daily_cap")
 
-    def test_mirror_counts_the_storage_overhead_in_the_funds_check(self):
-        self.assertIsNone(intent_denial(snap(balance=NEAR + INTENT_OVERHEAD), NEAR))
-        self.assertEqual(intent_denial(snap(balance=NEAR + INTENT_OVERHEAD - 1), NEAR), "insufficient_funds")
+    def test_the_budget_counts_the_storage_overhead_in_the_funds_check(self):
+        self.assertIsNone(budget_denial(snap(balance=NEAR + INTENT_OVERHEAD), NEAR, NOW_NS))
+        self.assertEqual(budget_denial(snap(balance=NEAR + INTENT_OVERHEAD - 1), NEAR, NOW_NS), "insufficient_funds")
 
-    def test_mirror_order_puts_the_daily_cap_before_funds(self):
-        self.assertEqual(intent_denial(snap(spent=3 * NEAR, balance=0), NEAR), "over_daily_cap")
+    def test_the_budget_puts_the_daily_cap_before_funds(self):
+        self.assertEqual(budget_denial(snap(spent=3 * NEAR, balance=0), NEAR, NOW_NS), "over_daily_cap")
+
+    def test_a_window_of_24_hours_or_more_counts_as_zero_spent(self):
+        start = NOW_NS - DAY_NS
+        self.assertIsNone(budget_denial(snap(spent=3 * NEAR, window_start_ns=start), NEAR, NOW_NS))
+        self.assertEqual(budget_denial(snap(spent=3 * NEAR, window_start_ns=start + 1), NEAR, NOW_NS), "over_daily_cap")
+        self.assertEqual(budget_denial(snap(spent=3 * NEAR, window_start_ns=None), NEAR, NOW_NS), "over_daily_cap")
+
+    def test_the_constants_equal_the_contract_values(self):
+        source = (Path(__file__).resolve().parents[2] / "contract" / "src" / "lib.rs").read_text()
+        storage = re.search(r"const STORAGE_DEPOSIT: u128 = ([0-9_]+);", source)
+        self.assertEqual(int(storage.group(1).replace("_", "")), STORAGE_DEPOSIT)
+        self.assertIn("const INTENT_OVERHEAD: u128 = 2 * STORAGE_DEPOSIT;", source)
+        self.assertEqual(INTENT_OVERHEAD, 2 * STORAGE_DEPOSIT)
+        day = re.search(r"const DAY_NS: u64 = ([0-9_]+);", source)
+        self.assertEqual(int(day.group(1).replace("_", "")), DAY_NS)
+        self.assertEqual(DAY_NS, 24 * 60 * 60 * 10**9)
 
     def test_each_hostile_response_is_refused_and_logged_without_an_issued_quote(self):
         def set_echo(key, value):
@@ -178,6 +241,7 @@ class GuardianTests(unittest.TestCase):
 
     def test_dry_quote_reads_no_vault_state_and_writes_no_issued_quote(self):
         guardian = Guardian(agent="a.near", vault_account="v.near", snapshot=mock.Mock(side_effect=AssertionError("vault read")),
+                            view=mock.Mock(side_effect=AssertionError("vault view read")),
                             routes=EnvRoutes(ASSET, "0xRecipient"), oneclick=FakeOneClick(), log=self.log, now=self.clock)
         issued = guardian.dry_quote(0, NEAR // 2, refund_to="real.near")
         self.assertTrue(issued.request.dry)
@@ -236,7 +300,7 @@ class GuardianTests(unittest.TestCase):
                 results.append(str(exc).split(":")[0])
 
         first = self.make(Slow())
-        second = Guardian(agent="a.near", vault_account="v.near", snapshot=lambda: self.snapshot,
+        second = Guardian(agent="a.near", vault_account="v.near", snapshot=lambda: self.snapshot, view=lambda method, args: "no_approval",
                           routes=EnvRoutes(ASSET, "0xRecipient"), oneclick=Slow(), log=GuardianLog(self.log.path),
                           other_accounts=("owner.near", "guardian.near"), now=self.clock, sleep=lambda s: None)
         threads = [threading.Thread(target=run, args=(first,)), threading.Thread(target=run, args=(second,))]
@@ -396,7 +460,7 @@ class StoredRoutesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             for expect, quotes in ((Route(ASSET, "0xStored"), 1), (Route(ASSET, "0xOther"), 0)):
                 oneclick = FakeOneClick()
-                guardian = Guardian(agent="a.near", vault_account="v.near", snapshot=lambda: snap(),
+                guardian = Guardian(agent="a.near", vault_account="v.near", snapshot=lambda: snap(), view=lambda method, args: "no_approval",
                                     routes=StoredRoutes(self.reader(self.STORED), expect), oneclick=oneclick,
                                     log=GuardianLog(Path(tmp) / f"g{quotes}.jsonl"), other_accounts=("owner.near", "guardian.near"),
                                     now=Clock(), sleep=lambda s: None)

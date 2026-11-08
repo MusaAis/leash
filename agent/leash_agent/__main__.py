@@ -51,7 +51,7 @@ def intents_dry(cfg, vault, amount_near, oneclick) -> int:
         asset = found[0]["assetId"]
     routes = EnvRoutes.from_env(asset)
     guardian = Guardian(
-        agent=cfg.agent, vault_account=cfg.vault, snapshot=vault.snapshot, routes=routes,
+        agent=cfg.agent, vault_account=cfg.vault, snapshot=vault.snapshot, view=vault.view, routes=routes,
         oneclick=oneclick, log=GuardianLog.from_env(), other_accounts=(cfg.owner,),
     )
     try:
@@ -140,7 +140,7 @@ def intents_quote(cfg, args, oneclick, runner) -> int:
     expect = Route(os.environ.get("LEASH_ROUTE_DEST_ASSET", ""), os.environ.get("LEASH_ROUTE_RECIPIENT", ""))
     routes = StoredRoutes(vault.view, expect)  # the vault's route is the truth; .env may only confirm it
     guardian = Guardian(
-        agent=cfg.agent, vault_account=cfg.vault, snapshot=vault.snapshot, routes=routes,
+        agent=cfg.agent, vault_account=cfg.vault, snapshot=vault.snapshot, view=vault.view, routes=routes,
         oneclick=oneclick, log=GuardianLog.from_env(), other_accounts=(cfg.owner, cfg.guardian, cfg.wnear),
     )
     try:

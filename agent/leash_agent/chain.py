@@ -155,6 +155,7 @@ class Snapshot:
     agent_paused: bool
     all_paused: bool
     balance: int
+    window_start_ns: int | None = None  # start of the 24 h window; None when the view does not give it
 
 
 Runner = Callable[[list[str]], str]
@@ -236,6 +237,7 @@ class Vault:
                 agent_paused=bool(policy["paused"]),
                 all_paused=paused_all is True,
                 balance=int(balance),  # type: ignore[arg-type]
+                window_start_ns=int(policy["window_start_ns"]) if policy.get("window_start_ns") is not None else None,
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ChainError(f"unexpected vault view output: {exc!r}") from exc

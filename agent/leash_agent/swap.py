@@ -11,7 +11,7 @@ from . import callpath
 from .callpath import CallPathError
 from .chain import ChainError, Vault, near_to_yocto, parse_call_output
 from .config import Config
-from .guardian import DEFAULT_MAX_PER_HOUR, GuardianLog, intent_denial
+from .guardian import DEFAULT_MAX_PER_HOUR, GuardianLog, Refused, intent_precheck
 from .intents import iso, parse_iso, utc_now
 
 HEX64 = re.compile(r"[0-9a-f]{64}")
@@ -103,7 +103,10 @@ def prepare_approval(
                 recent += 1
         if recent >= max_per_hour:
             raise CallPathError(f"rate_limit: {recent} approvals in the last hour (limit {max_per_hour})")
-        reason = intent_denial(vault.snapshot(), amount)  # fresh vault state, same order as the contract
+        try:
+            reason = intent_precheck(vault.view, vault.snapshot, cfg.agent, route_id, amount, _ns(now))  # fresh vault state
+        except Refused as exc:
+            raise CallPathError(str(exc)) from exc
         if reason:
             log.append({"event": "refused", "ts": now.isoformat(), "agent": cfg.agent, "route_id": route_id,
                         "amount": str(amount), "reason": reason})
