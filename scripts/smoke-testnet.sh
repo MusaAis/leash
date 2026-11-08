@@ -15,8 +15,9 @@ LEASH_RPC="${LEASH_RPC:-https://test.rpc.fastnear.com}"
 OUT="$HOME/leash-private/smoke-$PREFIX"; mkdir -p "$OUT"
 DEPOSIT="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 
-step "1/9 prefix check: agent-check must name $VAULT"
-(cd agent && python3 -m leash_agent check) | tee "$OUT/agent-check.txt" | grep -q "$VAULT" || { echo "agent-check does not name $VAULT: stop"; exit 1; }
+step "1/9 prefix check: the agent configuration must name $VAULT"
+AGENT_VAULT="$(cd agent && python3 -c 'from leash_agent.config import Config; print(Config.from_env().vault)')"
+[ "$AGENT_VAULT" = "$VAULT" ] || { echo "the agent uses $AGENT_VAULT, not $VAULT: stop"; exit 1; }
 
 step "2/9 accounts, deploy, policy"
 make accounts-testnet
