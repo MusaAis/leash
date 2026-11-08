@@ -175,7 +175,7 @@ def run_near(args: list[str]) -> str:
     if os.environ.get("LEASH_DEBUG"):
         print(f"--- near stderr ---\n{scrub(stderr)}\n--- near stdout ---\n{scrub(stdout)}")
     if proc.returncode != 0:
-        raise ChainError(f"near CLI failed: {scrub(_tail(stderr + stdout, 500))}")
+        raise ChainError(f"near CLI failed: {_tail(scrub(stderr + stdout), 500)}")
     return stderr + STDOUT_SENTINEL + stdout
 
 
