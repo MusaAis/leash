@@ -9,6 +9,7 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import collect_decisions as cd  # noqa: E402
 import replay_head  # noqa: E402
+import tx_gas  # noqa: E402
 
 VAULT = "v.testnet"
 TX_A, TX_B = "A" * 44, "B" * 44
@@ -56,6 +57,15 @@ class Collect(unittest.TestCase):
     def test_the_head_view_answer_is_decoded(self):
         raw = list(json.dumps("ab" * 32).encode())
         self.assertEqual(cd.read_head(lambda m, p: {"result": raw}, VAULT), "ab" * 32)
+
+    def test_a_public_key_in_the_text_is_not_a_hash(self):
+        text = f"Public key: ed25519:{'C' * 44}\nTransaction ID: {TX_A}\nhttps://x.org/transactions/{TX_A}"
+        self.assertEqual(cd.tx_hashes(text), [TX_A])
+
+    def test_gas_is_listed_for_the_transaction_and_each_receipt(self):
+        result = {"transaction_outcome": {"outcome": {"executor_id": "a.testnet", "gas_burnt": 315000000000}},
+                  "receipts_outcome": [{"outcome": {"executor_id": VAULT, "gas_burnt": 3094000000000}}]}
+        self.assertEqual(tx_gas.gas_rows(result), [("a.testnet", 0.315), (VAULT, 3.094)])
 
 
 if __name__ == "__main__":

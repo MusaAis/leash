@@ -15,7 +15,7 @@ import urllib.request
 
 PREFIX = "EVENT_JSON:"
 DECISIONS = frozenset({"spend_allowed", "spend_denied", "intent_sent", "intent_denied"})
-HASH_RE = re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{43,44}\b")
+HASH_RE = re.compile(r"(?<![:\w])[1-9A-HJ-NP-Za-km-z]{43,44}\b")  # not after a colon: public keys are ed25519:<44 characters>
 
 
 def rpc(url: str, method: str, params) -> dict:
