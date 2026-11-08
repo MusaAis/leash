@@ -13,15 +13,19 @@ GOT="$(sha256sum "$WASM" | cut -d' ' -f1)"
 [ "$GOT" = "$EXPECT_SHA" ] || { echo "wasm hash mismatch: $GOT"; exit 1; }
 LEASH_RPC="${LEASH_RPC:-https://test.rpc.fastnear.com}"
 OUT="$HOME/leash-private/smoke-$PREFIX"; mkdir -p "$OUT"
+# Test route: no swap runs on testnet, so a fixed destination asset and a public dummy recipient are used (the environment wins over .env).
+export LEASH_ROUTE_DEST_ASSET="${LEASH_ROUTE_DEST_ASSET:-nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near}"
+export LEASH_ROUTE_RECIPIENT="${LEASH_ROUTE_RECIPIENT:-0x000000000000000000000000000000000000dEaD}"
 DEPOSIT="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 
 step "1/9 prefix check: the agent configuration must name $VAULT"
 AGENT_VAULT="$(cd agent && python3 -c 'from leash_agent.config import Config; print(Config.from_env().vault)')"
 [ "$AGENT_VAULT" = "$VAULT" ] || { echo "the agent uses $AGENT_VAULT, not $VAULT: stop"; exit 1; }
 
-step "2/9 accounts, deploy, policy"
+step "2/9 accounts, deploy the wasm file as it is, policy"
 make accounts-testnet
-make deploy-testnet
+scripts/deploy-testnet.sh
+near account view-account-summary "$VAULT" network-config "$NETWORK" now 2>&1 | tee "$OUT/vault-summary.txt" | grep -qi "$EXPECT_SHA" || { echo "the code on $VAULT is not $EXPECT_SHA: stop"; exit 1; }
 make policy-testnet
 
 step "3/9 intents config, routes, function-call keys"

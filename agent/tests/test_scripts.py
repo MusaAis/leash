@@ -183,5 +183,14 @@ class AccountScriptKeyScheme(unittest.TestCase):
         self.assertIn("autogenerate-new-keypair --signature-scheme ed25519 save-to-legacy-keychain", text)
 
 
+class SmokeScript(unittest.TestCase):
+    def test_smoke_deploys_the_file_and_sets_a_test_route(self):
+        text = (ROOT / "scripts" / "smoke-testnet.sh").read_text()
+        self.assertNotIn("make deploy-testnet", text)
+        self.assertIn("scripts/deploy-testnet.sh", text)
+        self.assertIn("LEASH_ROUTE_RECIPIENT", text)
+        self.assertIn("grep -qi \"$EXPECT_SHA\"", text)
+
+
 if __name__ == "__main__":
     unittest.main()
