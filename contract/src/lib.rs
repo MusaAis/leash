@@ -27,14 +27,14 @@ const STORAGE_DEPOSIT: u128 = 1_250_000_000_000_000_000_000;
 /// Two storage deposits per swap (the vault and the deposit account). Counted in the
 /// funds check, the daily check and the daily counter, so the daily cap bounds them.
 const INTENT_OVERHEAD: u128 = 2 * STORAGE_DEPOSIT;
-/// Gas numbers below are placeholders, to be measured in the rehearsal.
-/// `spend_intent` panics early when less than this is attached (to be measured).
+/// Gas constants. The mainnet proof records the gas used by one swap; each value leaves room above it.
+/// `spend_intent` panics early when less than this is attached.
 const MIN_INTENT_GAS_TGAS: u64 = 120;
-/// Gas given to each of the four batch actions (to be measured).
+/// Gas given to each of the four batch actions.
 const ACTION_GAS_TGAS: u64 = 10;
-/// `unwrap` panics early when less than this is attached (to be measured).
+/// `unwrap` panics early when less than this is attached.
 const MIN_UNWRAP_GAS_TGAS: u64 = 30;
-/// Gas given to `near_withdraw` (to be measured).
+/// Gas given to `near_withdraw`.
 const UNWRAP_ACTION_GAS_TGAS: u64 = 20;
 
 #[near(serializers = [borsh])]
@@ -367,8 +367,16 @@ impl Leash {
         );
         require!(agent != self.owner, "owner cannot be an agent");
         require!(
+            agent != env::current_account_id(),
+            "vault cannot be an agent"
+        );
+        require!(
             self.guardian.as_ref() != Some(&agent),
             "guardian cannot be an agent"
+        );
+        require!(
+            self.wnear.as_ref() != Some(&agent),
+            "wnear cannot be an agent"
         );
         let (spent, start, paused) = match self.agents.get(&agent) {
             Some(p) => (p.spent_in_window, p.window_start_ns, p.paused),
@@ -457,6 +465,14 @@ impl Leash {
         require!(
             !self.agents.contains_key(&guardian),
             "guardian cannot be an agent"
+        );
+        require!(
+            wnear != self.owner && wnear != env::current_account_id() && wnear != guardian,
+            "wnear must differ from the owner, the vault and the guardian"
+        );
+        require!(
+            !self.agents.contains_key(&wnear),
+            "wnear cannot be an agent"
         );
         self.wnear = Some(wnear.clone());
         self.guardian = Some(guardian.clone());
@@ -1300,6 +1316,55 @@ mod tests {
         let (mut c, owner, _a, target) = setup();
         owner_ctx(&owner, T0);
         c.set_policy(owner.clone(), U128(NEAR), U128(NEAR), vec![target]);
+    }
+
+    #[test]
+    #[should_panic(expected = "vault cannot be an agent")]
+    fn set_policy_rejects_the_vault_as_agent() {
+        let (mut c, owner, _a, target) = setup();
+        owner_ctx(&owner, T0);
+        c.set_policy(vault(), U128(NEAR), U128(NEAR), vec![target]);
+    }
+
+    #[test]
+    #[should_panic(expected = "wnear cannot be an agent")]
+    fn set_policy_rejects_wnear_as_agent() {
+        let (mut c, owner, _a, target) = setup();
+        owner_ctx(&owner, T0);
+        c.set_intents_config(wnear(), guardian());
+        c.set_policy(wnear(), U128(NEAR), U128(NEAR), vec![target]);
+    }
+
+    #[test]
+    #[should_panic(expected = "wnear must differ")]
+    fn wnear_cannot_be_the_owner() {
+        let (mut c, owner, _a, _t) = setup();
+        owner_ctx(&owner, T0);
+        c.set_intents_config(owner.clone(), guardian());
+    }
+
+    #[test]
+    #[should_panic(expected = "wnear must differ")]
+    fn wnear_cannot_be_the_vault() {
+        let (mut c, owner, _a, _t) = setup();
+        owner_ctx(&owner, T0);
+        c.set_intents_config(vault(), guardian());
+    }
+
+    #[test]
+    #[should_panic(expected = "wnear must differ")]
+    fn wnear_cannot_be_the_guardian() {
+        let (mut c, owner, _a, _t) = setup();
+        owner_ctx(&owner, T0);
+        c.set_intents_config(guardian(), guardian());
+    }
+
+    #[test]
+    #[should_panic(expected = "wnear cannot be an agent")]
+    fn wnear_cannot_be_an_existing_agent() {
+        let (mut c, owner, agent, _t) = setup();
+        owner_ctx(&owner, T0);
+        c.set_intents_config(agent, guardian());
     }
 
     // ----- access control -----

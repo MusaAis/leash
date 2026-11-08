@@ -9,8 +9,8 @@
         "amount": "1000000",
         "memo": "ok"
       },
-      "line": "{\"standard\":\"leash\",\"version\":\"0.2.0\",\"event\":\"spend_allowed\",\"data\":[{\"agent\":\"bob.test\",\"to\":\"carol.test\",\"amount\":\"1000000\",\"memo\":\"ok\"}]}",
-      "head": "9f59acb9ec2aa4bf0eb63ff2c2d606eafdc67f7f361be533e82a777e61c9ceb4"
+      "line": "{\"standard\":\"leash\",\"version\":\"0.3.0\",\"event\":\"spend_allowed\",\"data\":[{\"agent\":\"bob.test\",\"to\":\"carol.test\",\"amount\":\"1000000\",\"memo\":\"ok\"}]}",
+      "head": "a6c633083029b12c5a4a70b06b4ae5e10308672f50e1c042ccc9a80358141e52"
     },
     {
       "outcome": "spend_denied",
@@ -21,8 +21,8 @@
         "reason": "over_per_tx_cap",
         "memo": ""
       },
-      "line": "{\"standard\":\"leash\",\"version\":\"0.2.0\",\"event\":\"spend_denied\",\"data\":[{\"agent\":\"bob.test\",\"to\":\"carol.test\",\"amount\":\"3000000\",\"reason\":\"over_per_tx_cap\",\"memo\":\"\"}]}",
-      "head": "95b1d856c4b759c6a561a6cf9ae132d524ca413a5d740e0389beb534aa14c5af"
+      "line": "{\"standard\":\"leash\",\"version\":\"0.3.0\",\"event\":\"spend_denied\",\"data\":[{\"agent\":\"bob.test\",\"to\":\"carol.test\",\"amount\":\"3000000\",\"reason\":\"over_per_tx_cap\",\"memo\":\"\"}]}",
+      "head": "f9236a5fd5ce86b7e6dfff9c6a0c17ba7570222b073d7a1d67d95ada54bf1069"
     },
     {
       "outcome": "intent_sent",
@@ -33,8 +33,8 @@
         "amount": "1000000",
         "quote_hash": "abababababababababababababababababababababababababababababababab"
       },
-      "line": "{\"standard\":\"leash\",\"version\":\"0.2.0\",\"event\":\"intent_sent\",\"data\":[{\"agent\":\"bob.test\",\"route_id\":0,\"deposit_account\":\"dep.test\",\"amount\":\"1000000\",\"quote_hash\":\"abababababababababababababababababababababababababababababababab\"}]}",
-      "head": "4d9b668fc17e5bfdefd11e1383a1516c38eb7b7edf2b5bc2f4859e030095e2d7"
+      "line": "{\"standard\":\"leash\",\"version\":\"0.3.0\",\"event\":\"intent_sent\",\"data\":[{\"agent\":\"bob.test\",\"route_id\":0,\"deposit_account\":\"dep.test\",\"amount\":\"1000000\",\"quote_hash\":\"abababababababababababababababababababababababababababababababab\"}]}",
+      "head": "b487f3f0ada2860baca4826d42a905acd16515675609022c24470c19e3da5568"
     },
     {
       "outcome": "intent_denied",
@@ -45,18 +45,18 @@
         "amount": "2000000",
         "reason": "no_approval"
       },
-      "line": "{\"standard\":\"leash\",\"version\":\"0.2.0\",\"event\":\"intent_denied\",\"data\":[{\"agent\":\"bob.test\",\"route_id\":0,\"deposit_account\":\"dep.test\",\"amount\":\"2000000\",\"reason\":\"no_approval\"}]}",
-      "head": "81be37d3e881d712894e19050f76763f402a6ce39b625b39c938cc36d0412a4a"
+      "line": "{\"standard\":\"leash\",\"version\":\"0.3.0\",\"event\":\"intent_denied\",\"data\":[{\"agent\":\"bob.test\",\"route_id\":0,\"deposit_account\":\"dep.test\",\"amount\":\"2000000\",\"reason\":\"no_approval\"}]}",
+      "head": "1a39a9923b9233a0bdd40f34ba45a652d0b02b97276b7562a3824884093dd59c"
     }
   ],
   "tampered": {
     "index": 1,
     "lines": [
-      "{\"standard\":\"leash\",\"version\":\"0.2.0\",\"event\":\"spend_allowed\",\"data\":[{\"agent\":\"bob.test\",\"to\":\"carol.test\",\"amount\":\"1000000\",\"memo\":\"ok\"}]}",
-      "{\"standard\":\"leash\",\"version\":\"0.2.0\",\"event\":\"spend_denied\",\"data\":[{\"agent\":\"bob.test\",\"to\":\"carol.test\",\"amount\":\"3000000\",\"reason\":\"zero_amount\",\"memo\":\"\"}]}",
-      "{\"standard\":\"leash\",\"version\":\"0.2.0\",\"event\":\"intent_sent\",\"data\":[{\"agent\":\"bob.test\",\"route_id\":0,\"deposit_account\":\"dep.test\",\"amount\":\"1000000\",\"quote_hash\":\"abababababababababababababababababababababababababababababababab\"}]}",
-      "{\"standard\":\"leash\",\"version\":\"0.2.0\",\"event\":\"intent_denied\",\"data\":[{\"agent\":\"bob.test\",\"route_id\":0,\"deposit_account\":\"dep.test\",\"amount\":\"2000000\",\"reason\":\"no_approval\"}]}"
+      "{\"standard\":\"leash\",\"version\":\"0.3.0\",\"event\":\"spend_allowed\",\"data\":[{\"agent\":\"bob.test\",\"to\":\"carol.test\",\"amount\":\"1000000\",\"memo\":\"ok\"}]}",
+      "{\"standard\":\"leash\",\"version\":\"0.3.0\",\"event\":\"spend_denied\",\"data\":[{\"agent\":\"bob.test\",\"to\":\"carol.test\",\"amount\":\"3000000\",\"reason\":\"zero_amount\",\"memo\":\"\"}]}",
+      "{\"standard\":\"leash\",\"version\":\"0.3.0\",\"event\":\"intent_sent\",\"data\":[{\"agent\":\"bob.test\",\"route_id\":0,\"deposit_account\":\"dep.test\",\"amount\":\"1000000\",\"quote_hash\":\"abababababababababababababababababababababababababababababababab\"}]}",
+      "{\"standard\":\"leash\",\"version\":\"0.3.0\",\"event\":\"intent_denied\",\"data\":[{\"agent\":\"bob.test\",\"route_id\":0,\"deposit_account\":\"dep.test\",\"amount\":\"2000000\",\"reason\":\"no_approval\"}]}"
     ],
-    "head": "e830e81c5f24c7643590fecd43382bfb9f4bab81811e59a7207218977bc150b8"
+    "head": "2dda119f09cf0137d4f0657fa127f55e565fadf27bb92b65fb9ede2b4b0f2e22"
   }
 }
