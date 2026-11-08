@@ -84,7 +84,10 @@ def prepare_approval(
         deposit, response = quote.get("deposit_address"), quote.get("response")
         if not isinstance(deposit, str) or not HEX64.fullmatch(deposit) or not isinstance(response, dict):
             raise CallPathError("the saved quote has no deposit address of the expected shape (64 lowercase hex characters)")
-        minutes = min(callpath.MAX_APPROVAL_MINUTES, max_minutes or callpath.MAX_APPROVAL_MINUTES, int((deadline - now).total_seconds() // 60))
+        if max_minutes is not None and max_minutes < 1:
+            raise CallPathError(f"--minutes must be from 1 to {callpath.MAX_APPROVAL_MINUTES}")
+        limit = callpath.MAX_APPROVAL_MINUTES if max_minutes is None else max_minutes
+        minutes = min(callpath.MAX_APPROVAL_MINUTES, limit, int((deadline - now).total_seconds() // 60))
         if minutes < 1:
             raise CallPathError(f"the saved quote's deadline ({iso(deadline)}) has passed or is less than a minute away: ask for a new quote")
         if any(e.get("event") == "approval_sent" and e.get("deposit_address") == deposit and not _failed_after(entries, i, "approval", deposit)

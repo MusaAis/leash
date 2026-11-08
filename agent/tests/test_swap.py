@@ -163,6 +163,13 @@ class PrepareApproval(Base):
             self.assertLess(expires - now_ns, 30 * 60 * 10**9)
         self.assertEqual(payload(self.approve(max_minutes=5)[0])["expires_ns"], str(now_ns + 5 * 60 * 10**9))
 
+    def test_zero_or_negative_minutes_are_refused_not_defaulted(self):
+        self.add(quote_entry(self.cfg, self.now))
+        for value in (0, -1):
+            with self.assertRaisesRegex(callpath.CallPathError, "--minutes must be"):
+                self.approve(max_minutes=value)
+        self.assertEqual(self.events("approval_sent"), [])
+
     def test_a_deposit_address_of_the_wrong_shape_is_refused(self):
         for bad in ("AB" * 32, "ab" * 31, "g.near", "", None):
             if self.log.path.exists():

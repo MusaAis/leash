@@ -196,7 +196,7 @@ def intents_call(cfg, args, runner) -> int:
                 if not args.deposit_account:
                     raise callpath.CallPathError("on testnet pass --deposit-account (1Click has no testnet, so there is no saved quote)")
                 built = callpath.approve_intent_args(
-                    cfg, args.route, args.deposit_account, args.amount, args.minutes or 20, args.quote_hash or callpath.REHEARSAL_QUOTE_HASH)
+                    cfg, args.route, args.deposit_account, args.amount, 20 if args.minutes is None else args.minutes, args.quote_hash or callpath.REHEARSAL_QUOTE_HASH)
                 accounts = [cfg.vault, cfg.guardian, cfg.agent, args.deposit_account]
             else:
                 accounts = [cfg.vault, cfg.guardian, cfg.agent]

@@ -228,7 +228,9 @@ def link_account_file(cfg: Config, answers: dict[str, object], home: Path) -> li
         if len(usable) != 1:
             lines.append(f"{account}: {len(usable)} function-call key files found, not exactly one; {target.name} was not written")
             continue
-        shutil.copyfile(usable[0], target)
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)  # private from the first byte
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(usable[0].read_bytes())
         os.chmod(target, 0o600)
         lines.append(f"{account}: copied the function-call key file to {target.name} so the CLI finds it")
     return lines

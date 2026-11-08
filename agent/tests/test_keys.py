@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from leash_agent import keys
 from leash_agent.callpath import CallPathError
@@ -357,6 +358,16 @@ class Aside(unittest.TestCase):
             link = self.home / ".near-credentials" / "testnet" / f"{account}.json"
             self.assertEqual(json.loads(link.read_text())["public_key"], "ed25519:K1")
             self.assertEqual(oct(link.stat().st_mode & 0o777), "0o600")
+
+    def test_the_linked_key_file_is_private_from_its_creation(self):
+        old = os.umask(0)
+        try:
+            with mock.patch("leash_agent.keys.os.chmod"):  # the mode must come from the open call itself
+                keys.link_account_file(self.cfg, {"g.testnet": self.answers["g.testnet"]}, self.home)
+        finally:
+            os.umask(old)
+        link = self.home / ".near-credentials" / "testnet" / "g.testnet.json"
+        self.assertEqual(oct(link.stat().st_mode & 0o777), "0o600")
 
     def test_an_existing_account_file_is_never_overwritten(self):
         link = self.home / ".near-credentials" / "testnet" / "g.testnet.json"
