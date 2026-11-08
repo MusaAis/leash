@@ -37,7 +37,7 @@ The agent account holds only gas money; funds stay in the vault. Model output is
 - The owner is fixed at deploy and there is no ownership transfer. Losing the owner key locks the funds. An offline backup key on the owner account is the recovery practice.
 - An owner full-access key can reset an agent's daily counter. `remove_agent` deletes the policy and its counter, and `set_policy` then recreates it from zero. A function-call key cannot do either, because both need 1 yoctoNEAR. `set_policy` alone keeps the counter.
 - The mainnet vault is not locked. See [Current mainnet state](#current-mainnet-state).
-- Contract 0.2.0 changes the state layout and has no `migrate`. It is deployed fresh, never over an older vault.
+- Contract 0.3.0 changes the state layout of 0.2.0 and has no `migrate`. It is deployed fresh, never over an older vault.
 
 ### Cross-chain path (guardian)
 

@@ -242,16 +242,22 @@ def wasm_problems(build_md: str, proof_md: str) -> list[str]:
     return problems
 
 
-MONTHS = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?"
+MONTHS = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?"
 DATE_SHAPES = [
     r"\b20\d\d-\d\d-\d\d\b",
+    r"\b20\d\d-\d\d\b",
     r"\b20\d\d/\d\d?/\d\d?\b",
     r"\b\d\d?/\d\d?/20\d\d\b",
+    r"\b\d\d?/\d\d?/\d\d\b",
+    r"\b\d\d?/20\d\d\b",
     r"\b" + MONTHS + r" \d{1,2}(?:st|nd|rd|th)?(?:,? 20\d\d)?\b",
-    r"\b\d{1,2}(?:st|nd|rd|th)? " + MONTHS + r"(?: 20\d\d)?\b",
-    r"\b" + MONTHS + r" 20\d\d\b",
+    r"\b\d{1,2}(?:st|nd|rd|th)?(?: of)? " + MONTHS + r"(?:,? 20\d\d)?\b",
+    r"\b" + MONTHS + r",? 20\d\d\b",
+    r"\b20\d\d-" + MONTHS + r"-\d\d?\b",
+    r"\b" + MONTHS + r"-\d\d?-20\d\d\b",
     r"\b20\d\d\.\d\d\.\d\d\b",
     r"\b\d\d\.\d\d\.20\d\d\b",
+    r"\b\d\d\.\d\d\.\d\d\b",
     r"\b\d\d-\d\d-20\d\d\b",
     r"\b20\d\d(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\b",
 ]
@@ -263,7 +269,7 @@ def snapshot_problems(name: str, body: str) -> list[str]:
     prose = re.sub(r"^\|.*$", "", prose, flags=re.M)
     prose = re.sub(r"`[^`\n]*`", "", prose)
     prose = re.sub(r"\[[^\]]*\]\([^)]*\)", "", prose)
-    found = [m.group(0) for shape in DATE_SHAPES for m in re.finditer(shape, prose)]
+    found = [m.group(0) for shape in DATE_SHAPES for m in re.finditer(shape, prose, re.I)]
     return [f"{name} has a date in prose: {d}" for d in found]
 
 
@@ -345,6 +351,27 @@ def readme_pin_problems(readme: str, cargo_toml: str, toolchain_toml: str) -> li
     return problems
 
 
+CONTRACT_VERSION_PAGES = ("docs/security.md", "docs/adr/0005-intents-design-and-trust.md", "docs/deployment.md")
+
+
+def contract_version_problems(pages: dict[str, str], cargo_toml: str) -> list[str]:
+    """The first `contract X.Y.Z` on a guide page names the version in Cargo.toml (proof pages, STATE and CHANGELOG are history)."""
+    crate = re.search(r'^version\s*=\s*"(\d+\.\d+\.\d+)"', cargo_toml, re.M)
+    if not crate:
+        return ["contract/Cargo.toml has no version"]
+    problems = []
+    for name, body in pages.items():
+        for found in re.findall(r"\bcontract (\d+\.\d+\.\d+)", body, re.I):
+            if found != crate.group(1):
+                problems.append(f"{name} names contract {found}, Cargo.toml has {crate.group(1)}")
+    return problems
+
+
+def check_contract_version() -> list[str]:
+    return contract_version_problems({n: text(n) for n in CONTRACT_VERSION_PAGES}, text("contract/Cargo.toml"))
+
+
+
 def check_readme_pin() -> list[str]:
     return readme_pin_problems(text("README.md"), text("contract/Cargo.toml"), text("contract/rust-toolchain.toml"))
 
@@ -390,6 +417,7 @@ CHECKS = [
     ("README network badge matches the proofs", check_badge),
     ("near-sdk pin is stated in docs/build.md", check_pin),
     ("README pinned build inputs match the toolchain files", check_readme_pin),
+    ("guide pages name the current contract version", check_contract_version),
     ("artifact hashes in docs/build.md match the mainnet proof", check_wasm_facts),
     ("heading anchors in links exist", check_anchors),
 ]

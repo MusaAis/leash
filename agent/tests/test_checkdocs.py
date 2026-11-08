@@ -76,11 +76,14 @@ class DocsChecks(unittest.TestCase):
             self.assertTrue(cd.snapshot_problems("s.md", bad), bad)
         self.assertEqual(cd.snapshot_problems("s.md", "See [the table](mainnet-proof.md#2026-11-06) and `2026-11-06`.\n```\n2026-11-06\n```"), [])
         for bad in ("It ran on 6 November 2026.", "It ran on Nov 6.", "It ran on 6th Nov.", "It ran on 2026/11/06.", "It ran on 06/11/2026.", "Read in Nov. 6, 2026.",
-                    "As of November 2026.", "Since Nov 2026.", "Run 2026.11.04.", "Run 04.11.2026.", "Run 04-11-2026.", "Run 20261104."):
+                    "As of November 2026.", "Since Nov 2026.", "Run 2026.11.04.", "Run 04.11.2026.", "Run 04-11-2026.", "Run 20261104.",
+                    "as of the 4th of November", "nov 4", "NOVEMBER 4", "2026-11", "November, 2026", "2026-Nov-04", "Nov-04-2026", "4/11/26", "04.11.26", "11/2026"):
             self.assertTrue(cd.snapshot_problems("s.md", bad), bad)
         self.assertEqual(cd.snapshot_problems("s.md", "| Run on | 2026-11-06 |\n|---|---|\nNo date here."), [])
         self.assertEqual(cd.snapshot_problems("s.md", "The November release adds 3 methods."), [])
         self.assertEqual(cd.snapshot_problems("s.md", "Gas 20000000 and version 2.6.0 and 1.96.0."), [])
+        for good in ("Decision 4 is final.", "You may 3x retry.", "The market 2026 report.", "Version 1.2.10 and 5.28.3.", "Check 3 of 5."):
+            self.assertEqual(cd.snapshot_problems("s.md", good), [], good)
         self.assertTrue(cd.stale_phrases("CHANGELOG.md", "moves creation-key files"))
         self.assertEqual(cd.stale_phrases("CHANGELOG.md", "moves full-access key files"), [])
         from unittest import mock
@@ -137,6 +140,15 @@ class DocsChecks(unittest.TestCase):
         self.assertEqual(len(cd.readme_pin_problems(row.replace("badge/near--sdk-%3D5.28.3-blue", ""), cargo, tool)), 1)
         self.assertEqual(len(cd.readme_pin_problems(row.replace("Rust-1.96.0-orange", "Rust-1.95.0-orange"), cargo, tool)), 1)
 
+
+
+class ContractVersionTests(unittest.TestCase):
+    def test_version_in_guide_pages(self):
+        cargo = 'name = "leash"\nversion = "0.3.0"\n'
+        self.assertEqual(cd.contract_version_problems({"a.md": "Contract 0.3.0 changes the layout of 0.2.0."}, cargo), [])
+        for bad in ("Contract 0.2.0 changes the layout.", "## Guardian key (contract 0.2.0)", "The contract 0.4.0 adds more."):
+            self.assertTrue(cd.contract_version_problems({"a.md": bad}, cargo), bad)
+        self.assertTrue(cd.contract_version_problems({"a.md": "x"}, "no version here"))
 
 if __name__ == "__main__":
     unittest.main()
