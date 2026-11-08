@@ -2,7 +2,7 @@ SAMPLES ?= 1
 AMOUNT ?= 0.5
 # Values typed on a command line reach the recipes through the environment and are quoted there.
 export TASK AMOUNT SYMBOL CHAIN PROBE_AMOUNT SAMPLES MODELS ACCOUNT
-.PHONY: build-info test build fmt lint check check-docs test-agent agent-models agent-dry accounts-testnet deploy-testnet demo-testnet lock-vault-testnet policy-testnet agent-check agent-run attack-testnet attack-llm-testnet intents-tokens intents-dry intents-wet-probe wrap-storage agent-signature guard intents-status intents-config intents-routes intents-approve intents-spend intents-quote intents-keys
+.PHONY: build-info test build fmt lint check check-docs test-agent agent-models agent-dry accounts-testnet deploy-testnet demo-testnet lock-vault-testnet policy-testnet agent-check agent-run attack-testnet attack-llm-testnet intents-tokens intents-dry intents-wet-probe wrap-storage agent-signature guard intents-status intents-config intents-routes intents-approve intents-spend intents-quote intents-keys panic-key
 
 test:
 	cd contract && cargo test --locked
@@ -95,6 +95,9 @@ intents-status:
 
 intents-keys:
 	cd agent && python3 -m leash_agent intents-keys $(SEND) $(ASIDE_FLAG)
+
+panic-key:
+	cd agent && python3 -m leash_agent panic-key $(SEND)
 
 intents-config:
 	cd agent && python3 -m leash_agent intents-config $(if $(CONFIRM_VAULT),--confirm-vault "$$CONFIRM_VAULT") $(SEND)
