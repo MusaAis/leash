@@ -183,6 +183,50 @@ class AccountScriptKeyScheme(unittest.TestCase):
         self.assertIn("autogenerate-new-keypair --signature-scheme ed25519 save-to-legacy-keychain", text)
 
 
+class ReceivingAccountsAvoidTheFaucet(unittest.TestCase):
+    """Runs scripts/accounts-testnet.sh with a fake `near` that logs its arguments."""
+
+    def run_script(self, existing):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        bin_dir = Path(tmp.name) / "bin"
+        bin_dir.mkdir()
+        log = Path(tmp.name) / "calls.txt"
+        shim = bin_dir / "near"
+        shim.write_text(
+            "#!/bin/sh\n"
+            f'echo "$*" >> "{log}"\n'
+            'if [ "$2" = view-account-summary ]; then\n'
+            f'  case " {existing} " in *" $3 "*) exit 0 ;; esac\n'
+            '  echo "account $3 does not exist"; exit 1\n'
+            "fi\n"
+            "exit 0\n"
+        )
+        shim.chmod(0o755)
+        env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", HOME=tmp.name, LEASH_PREFIX="z")
+        env.pop("NETWORK", None)
+        out = subprocess.run(["bash", "scripts/accounts-testnet.sh"], cwd=ROOT, env=env, capture_output=True, text=True)
+        calls = log.read_text().splitlines() if log.exists() else []
+        return out, calls
+
+    def test_payee_and_attacker_are_created_by_the_owner_not_the_faucet(self):
+        out, calls = self.run_script("z-vault.testnet z-owner.testnet z-agent.testnet z-guardian.testnet")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertFalse([c for c in calls if "sponsor-by-faucet-service" in c], calls)
+        for name in ("z-payee.testnet", "z-attacker.testnet"):
+            created = [c for c in calls if "create-account fund-myself " + name in c]
+            self.assertEqual(len(created), 1, calls)
+            self.assertIn("sign-as z-owner.testnet", created[0])
+            self.assertIn("0.1 NEAR", created[0])
+            self.assertIn("--signature-scheme ed25519", created[0])
+
+    def test_the_other_accounts_still_use_the_faucet(self):
+        out, calls = self.run_script("")
+        faucet = [c for c in calls if "sponsor-by-faucet-service" in c]
+        self.assertEqual(len(faucet), 4, calls)
+        self.assertFalse([c for c in faucet if "payee" in c or "attacker" in c], faucet)
+
+
 class SmokeScript(unittest.TestCase):
     def test_smoke_deploys_the_file_and_sets_a_test_route(self):
         text = (ROOT / "scripts" / "smoke-testnet.sh").read_text()

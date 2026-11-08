@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
   <img src="https://img.shields.io/badge/network-NEAR%20mainnet%20and%20testnet-informational" alt="Network">
   <img src="https://img.shields.io/badge/contract%20tests-148%20passed-brightgreen" alt="Contract tests">
-  <img src="https://img.shields.io/badge/agent%20tests-429%20passed-brightgreen" alt="Agent tests">
+  <img src="https://img.shields.io/badge/agent%20tests-431%20passed-brightgreen" alt="Agent tests">
   <img src="https://img.shields.io/badge/Rust-1.96.0-orange" alt="Rust">
   <img src="https://img.shields.io/badge/near--sdk-%3D5.28.3-blue" alt="near-sdk">
 </p>
@@ -78,7 +78,7 @@ make test-agent   # agent tests
 make check        # format check, lint, contract and agent tests
 ```
 
-Expected: `make test` ends with `test result: ok. 148 passed`, and `make test-agent` prints `Ran 429 tests` followed by `OK`.
+Expected: `make test` ends with `test result: ok. 148 passed`, and `make test-agent` prints `Ran 431 tests` followed by `OK`.
 
 ### Testnet demo (optional, needs network)
 
@@ -86,7 +86,7 @@ A scripted run with a pass/fail check per step: the owner sets a policy, the age
 
 ```
 export LEASH_PREFIX=myleash   # a unique name; use a fresh one for every demo run
-make accounts-testnet         # create five faucet-funded testnet accounts
+make accounts-testnet         # create the testnet accounts: four faucet-funded, two funded by the owner
 make deploy-testnet           # build, deploy and initialize the vault in one transaction
 make demo-testnet             # run the scripted scenario
 ```
