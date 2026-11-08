@@ -39,6 +39,7 @@ Giving an AI agent a key means trusting it with everything that key controls. If
 
 | Rule | Description |
 |---|---|
+| Pinned build inputs | Rust 1.96.0 and near-sdk =5.28.3, see [docs/build.md](docs/build.md) |
 | Per-transaction cap | Maximum amount for a single payment |
 | Daily cap | Maximum total per fixed 24-hour window |
 | Destination allowlist | Up to 20 accounts the agent may pay |
@@ -51,9 +52,6 @@ Measured on NEAR testnet and, where a row says so, on mainnet. Every testnet row
 
 | Check | Result |
 |---|---|
-| Pinned build inputs | Rust 1.96.0 and near-sdk =5.28.3, see [docs/build.md](docs/build.md) |
-| Contract unit tests | 148 passed |
-| Agent unit tests | 402 passed |
 | 1Click dry quotes against the live mainnet API, no funds | 9 sizes from 0.5 to 0.001 NEAR passed the guardian's checks, see [docs/intents.md](docs/intents.md) |
 | Mainnet: one vault, one real swap through it (0.1 NEAR to USDC on Base) | The vault's batch succeeded on chain and 1Click returned status SUCCESS (0.37853 USDC delivered on Base); every transaction, the gas and the balances are in [docs/mainnet-proof.md](docs/mainnet-proof.md) |
 | Scripted testnet demo (`make demo-testnet`) | 12 checks passed, 0 failed |
@@ -197,10 +195,6 @@ Makefile             short entry points for every command above
 - [Documentation index](docs/README.md)
 - [Architecture decisions](docs/adr)
 - [Changelog](CHANGELOG.md)
-
-## Pre-existing code
-
-No pre-existing code is included in this repository. Any later integration of earlier work will live in its own directory and be listed here with a link to the diff.
 
 ## License
 

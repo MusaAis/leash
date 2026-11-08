@@ -72,10 +72,9 @@ def check_test_counts() -> list[str]:
     agent = suite.countTestCases()
     contract = text("contract/src/lib.rs").count("#[test]")
     claims = [
-        ("README.md", r"Agent unit tests \| (\d+) passed", agent), ("README.md", r"Ran (\d+) tests", agent),
+        ("README.md", r"Ran (\d+) tests", agent),
         ("docs/STATE.md", r"(\d+) agent tests", agent),
         ("README.md", r"badge/agent%20tests-(\d+)%20passed", agent), ("README.md", r"badge/contract%20tests-(\d+)%20passed", contract),
-        ("README.md", r"Contract unit tests \| (\d+) passed", contract),
         ("README.md", r"test result: ok\. (\d+) passed", contract), ("docs/STATE.md", r"(\d+) contract tests", contract),
     ]
     problems = []
