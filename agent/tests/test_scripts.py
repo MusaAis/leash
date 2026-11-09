@@ -233,7 +233,63 @@ class SmokeScript(unittest.TestCase):
         self.assertNotIn("make deploy-testnet", text)
         self.assertIn("scripts/deploy-testnet.sh", text)
         self.assertIn("LEASH_ROUTE_RECIPIENT", text)
-        self.assertIn("grep -qi \"$EXPECT_SHA\"", text)
+        self.assertIn("scripts/vault-has-code.sh", text)
+        self.assertNotIn("grep -qi", text)
+
+
+class VaultHasCode(unittest.TestCase):
+    """Runs scripts/vault-has-code.sh with a fake `near` that prints a canned account summary."""
+
+    SHA = "18f112959fc2a6ec4a83489803589c83872c43564e96cd94ac70df1f1113dff0"
+    B58 = "2gMzTHTr2TwtwAaHsXZbKH9nBLi2ZfU9HLMVHG82B8KZ"
+
+    def run_script(self, answers, tries="3"):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        bin_dir = Path(tmp.name) / "bin"
+        bin_dir.mkdir()
+        for i, text in enumerate(answers):
+            (Path(tmp.name) / f"a{i}").write_text(text)
+        counter = Path(tmp.name) / "n"
+        shim = bin_dir / "near"
+        shim.write_text(
+            "#!/bin/sh\n"
+            f'n=$(cat "{counter}" 2>/dev/null || echo 0)\n'
+            f'last={len(answers) - 1}\n'
+            '[ "$n" -gt "$last" ] && n=$last\n'
+            f'cat "{tmp.name}/a$n"\n'
+            f'echo $((n + 1)) > "{counter}"\n'
+        )
+        shim.chmod(0o755)
+        env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", LEASH_CODE_WAIT="0")
+        env.pop("NETWORK", None)
+        return subprocess.run(
+            ["bash", "scripts/vault-has-code.sh", "v.testnet", self.SHA, tries],
+            cwd=ROOT, env=env, capture_output=True, text=True,
+        )
+
+    def test_hex_hash_matches(self):
+        out = self.run_script([f"Contract (SHA-256 checksum hex): {self.SHA}\n"])
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_base58_hash_matches(self):
+        out = self.run_script([f"Contract hash: {self.B58}\n"])
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_a_lagging_read_is_retried(self):
+        out = self.run_script(["Contract: none\n", f"Contract hash: {self.SHA}\n"])
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_another_hash_fails_and_shows_the_lines(self):
+        out = self.run_script(["Contract hash: FwEhAR96xHdsMmMrHM4vqNJgKNoH66VapxMY19AeXzne\n"], tries="2")
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("does not match", out.stderr)
+        self.assertIn("FwEhAR96", out.stderr)
+
+    def test_a_bad_sha_is_refused(self):
+        out = subprocess.run(["bash", "scripts/vault-has-code.sh", "v.testnet", "nothex"],
+                             cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(out.returncode, 2)
 
 
 if __name__ == "__main__":

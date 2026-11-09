@@ -24,8 +24,13 @@ AGENT_VAULT="$(cd agent && python3 -c 'from leash_agent.config import Config; pr
 
 step "2/9 accounts, deploy the wasm file as it is, policy"
 make accounts-testnet
-scripts/deploy-testnet.sh
-near account view-account-summary "$VAULT" network-config "$NETWORK" now 2>&1 | tee "$OUT/vault-summary.txt" | grep -qi "$EXPECT_SHA" || { echo "the code on $VAULT is not $EXPECT_SHA: stop"; exit 1; }
+# A vault that already runs the exact wasm is not deployed again (the init call runs once).
+if scripts/vault-has-code.sh "$VAULT" "$EXPECT_SHA" 1 2>/dev/null; then
+  echo "the vault already runs the expected wasm: deploy skipped"
+else
+  scripts/deploy-testnet.sh
+fi
+scripts/vault-has-code.sh "$VAULT" "$EXPECT_SHA" || { echo "the code on $VAULT is not $EXPECT_SHA: stop"; exit 1; }
 make policy-testnet
 
 step "3/9 intents config, routes, function-call keys"
