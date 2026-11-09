@@ -88,6 +88,12 @@ Each event is logged as `EVENT_JSON:` followed by `{"standard":"leash","version"
 
 Amounts are in yoctoNEAR, as strings.
 
+## Decision log and views
+
+Every allowed and denied `spend` and `spend_intent` writes its event through one function that also extends the hash chain `head = sha256(previous head || event text)`. `get_head_hash` returns the head. `scripts/replay_head.py` replays event lines against it; `make chain-check-testnet` collects the events of a testnet run and replays them.
+
+`would_spend` and `would_spend_intent` run the same check functions as the real methods. The guardian calls `would_spend_intent` before it asks for a quote.
+
 ## Related documents
 
 [Security model](security.md) · [NEAR Intents quotes](intents.md) · [Agent runtime](agent.md) · [Deployment guide](deployment.md) · [Architecture decisions](adr)

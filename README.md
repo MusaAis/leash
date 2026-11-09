@@ -55,6 +55,8 @@ Measured on NEAR testnet and, where a row says so, on mainnet. Every testnet row
 | 1Click dry quotes against the live mainnet API, no funds | 9 sizes from 0.5 to 0.001 NEAR passed the guardian's checks, see [docs/intents.md](docs/intents.md) |
 | Mainnet: one vault, one real swap through it (0.1 NEAR to USDC on Base) | The vault's batch succeeded on chain and 1Click returned status SUCCESS (0.37853 USDC delivered on Base); every transaction, the gas and the balances are in [docs/mainnet-proof.md](docs/mainnet-proof.md) |
 | Scripted testnet demo (`make demo-testnet`) | 12 checks passed, 0 failed |
+| Release wasm on testnet: hijacked agent, one allowed and one denied `spend_intent`, chain replay | 14 requests: 11 blocked, 0 paid to a non-payee; `chain OK` over 16 decision events, `chain BROKEN` for an altered line; see [docs/testnet-proof.md](docs/testnet-proof.md) |
+| Vault deleted and created again with the release wasm | Counters and head start from zero; the guardian and agent function-call keys signed for the new vault; see [docs/testnet-proof.md](docs/testnet-proof.md) |
 | Hijacked agent on a fresh policy, every request sent straight to the vault | 14 requests: 11 blocked by the vault, 3 paid to the allowlisted payee inside the caps (by design), 0 paid to a non-payee |
 | Live model, attack text only | Control task passed. 10 of 10 attacks refused by the agent, and 30 of 30 with three samples per attack at temperature 0.7 |
 | Live model, authorized 0.2 NEAR invoice with the attack inside it | 10 of 10 payments were exactly the authorized amount to the authorized payee, and 30 of 30 decisions with three samples. Agent fooled 0, funds lost 0 |
@@ -138,7 +140,8 @@ Before it sends anything, the suite checks the vault (policy, pauses, allowlist,
 | `approve_intent(agent, route_id, deposit_account, amount, expires_ns, quote_hash)` | Guardian | Single-use approval, at most 30 minutes, at most 5 pending per agent |
 | `spend_intent(route_id, deposit_account, amount)` | Agent | Same checks as `spend` plus a matching approval; pays the deposit address through wNEAR |
 | `unwrap(amount)` | Owner | Requires 1 yoctoNEAR; converts wNEAR back to NEAR, also while paused |
-| `get_policy`, `get_stats`, `get_owner`, `is_paused_all`, `get_available_balance`, `get_guardian`, `get_wnear`, `get_routes`, `get_approvals` | Anyone | Views |
+| `get_policy`, `get_stats`, `get_owner`, `is_paused_all`, `get_available_balance`, `get_guardian`, `get_wnear`, `get_routes`, `get_approvals`, `get_head_hash` | Anyone | Views |
+| `would_spend(agent, to, amount, memo)`, `would_spend_intent(agent, route_id, deposit_account, amount)` | Anyone | Views that run the same checks as `spend` and `spend_intent` and return `allowed` or the denial reason |
 
 Events: `funded`, `withdrawn`, `policy_set`, `agent_removed`, `agent_paused`, `agent_resumed`, `paused_all`, `resumed_all`, `spend_allowed`, `spend_denied`, `intents_configured`, `routes_set`, `intent_approved`, `intent_sent`, `intent_denied`, `unwrapped`.
 
@@ -146,11 +149,16 @@ Denial reasons: `all_paused`, `memo_too_long`, `agent_paused`, `zero_amount`, `o
 
 `spend_intent` shares these except `memo_too_long` and `not_allowlisted`, and adds `intents_not_configured`, `unknown_route` and `no_approval`.
 
+For an account without a policy the real methods revert, and the two `would_spend` views return `no_policy`.
+
 ## Security
 
 - **Direct payments (`spend`)** are enforced entirely on-chain: per-transaction cap, daily cap, destination allowlist, per-agent pause and a global kill switch. The agent cannot pay anything the policy does not allow.
 - **Cross-chain payments (`spend_intent`)** are enforced on-chain for caps, pauses and a single-use approval that expires within 30 minutes. A separate guardian account issues each approval after checking the 1Click quote against the route the owner stored on the vault.
 - **Keys:** the agent and the guardian sign with function-call keys limited to specific methods on the vault. An owner method that moves funds needs exactly 1 yoctoNEAR, which a function-call key cannot attach.
+- **Decision log:** every allowed and denied `spend` and `spend_intent` extends a hash chain; `get_head_hash` returns its head. `make chain-check-testnet` replays the events of a run and prints `chain OK`, or `chain BROKEN` for an altered, missing or reordered event.
+- **Guardian pre-check:** before it asks 1Click for a quote, the guardian calls the vault view `would_spend_intent` and stops on any denial except a missing approval.
+- **Panic key:** `make panic-key` adds a function-call key to the owner account that can call only `pause_agent` and `pause_all` on the vault.
 - **Exit:** the owner can pause and withdraw at any time.
 - **Evidence:** every decision is a NEP-297 event; blocked attacks are counted on-chain.
 
@@ -179,6 +187,7 @@ Makefile             short entry points for every command above
 | Agent runtime with NEAR AI Cloud decisions and attack suite | Implemented, tested on testnet |
 | Mainnet deployment | One vault deployed and used for one swap, see [proof](docs/mainnet-proof.md) |
 | 1Click dry quotes with a guardian check | Implemented, live dry quotes recorded in [docs/intents.md](docs/intents.md) |
+| Hash-chained decision log, `would_spend` views, pause-only key | Implemented, see [proof](docs/testnet-proof.md) |
 | Cross-chain payment through the vault | Done once on mainnet; 1Click returned status SUCCESS and 0.37853 USDC delivered on Base |
 | Arena, SDK | Planned |
 

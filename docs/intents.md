@@ -20,6 +20,7 @@ Expected: `intents-dry` ends with `verified: amountIn=... amountOut=... minAmoun
 - Sends requests only to `1click.chaindefuser.com` over https, with no redirects and a size cap.
 - Keeps a private log (`~/.leash/guardian-log.jsonl`, mode 0600, tightened on every write) with every answer and its signature. The quote signature is saved, not verified.
 - Counts every call to 1Click, rejected or failed ones too: at most 10 a minute and 60 an hour, and 6 real quotes an hour with one open at a time. A lock file keeps two processes from passing the same check.
+- Calls the vault view `would_spend_intent` before it asks for a quote and stops on any denial except `no_approval`; it also checks the daily room and the balance. The vault checks again when the agent spends.
 - Prints nothing private: the recipient and the refund account are hidden in every printed line, in any letter case, error messages included.
 
 ## Recorded results (live 1Click mainnet API, dry quotes)

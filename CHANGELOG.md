@@ -3,7 +3,13 @@
 All notable changes are listed here. Versions follow semantic versioning.
 
 ## [Unreleased]
+
+## [0.3.2] - 2026-11-09
 ### Added
+- Contract 0.3.0: a hash chain over every allowed and denied `spend` and `spend_intent` (`get_head_hash`); the views `would_spend` and `would_spend_intent`, which run the same checks as the real methods; refusals for an agent that is the owner, the vault, the guardian or the wNEAR contract, and for a guardian or wNEAR contract that is the owner, the vault or an agent. A fresh deploy is needed: the state layout changed and there is no `migrate`.
+- `scripts/replay_head.py`, `scripts/collect_decisions.py` and `make chain-check-testnet` replay the decision events of a run against the vault's head.
+- `make panic-key` adds a pause-only function-call key to the owner account.
+- `scripts/smoke-testnet.sh` runs accounts, deploy, policy, attack suite, one allowed and one denied `spend_intent`, chain replay and gas read on a fresh testnet prefix; `scripts/vault-has-code.sh` checks the code hash on chain; `scripts/tx_gas.py` reads gas per receipt.
 - `contract/rust-toolchain.toml` pins Rust 1.96.0 and `near-sdk` is pinned to `=5.28.3` in `contract/Cargo.toml`; `make lint` uses `--locked`.
 - `make build-info` and `scripts/wasm_imports.py` print the toolchain versions, the size, the sha256 and the host imports of the wasm artifact; `docs/build.md` records them for `v0.3.1`.
 - `intents-quote` builds the quote from the route stored on the vault (`get_routes`); a value in `.env` can only confirm it, and a difference is refused.
@@ -11,6 +17,8 @@ All notable changes are listed here. Versions follow semantic versioning.
 - `scripts/check_docs.py` also checks stale phrases, private-process terms, the README interface table and event list against the contract, dated balances in the security page, the README badge, the `near-sdk` pin and the artifact facts in `docs/build.md`, and heading anchors in links. Each check has a unit test with a failing fixture.
 
 ### Changed
+- The guardian calls `would_spend_intent` before it asks for a quote; its Python mirror keeps only the daily-cap and balance checks.
+- Account creation passes `--signature-scheme ed25519`; the payee and attacker accounts are created from the owner without a faucet call.
 - The default model is `z-ai/glm-5.3-flash`: not an alias, with recorded signature kind `provider_tee`. LEASH records the signature kind and checks the hashes; it does not verify the signature.
 - Values typed after `make` reach the recipes as data. The account, deploy, demo and policy scripts refuse a network other than testnet; `lock-vault.sh` needs `LEASH_ALLOW_MAINNET=1` outside testnet. Debug output passes `scrub()`, and an unknown `NETWORK` is refused.
 - The README badge shows mainnet and testnet. Evidence wording in the proofs states what a reader can open.
