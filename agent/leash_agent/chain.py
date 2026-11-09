@@ -155,6 +155,7 @@ class Snapshot:
     agent_paused: bool
     all_paused: bool
     balance: int
+    window_start_ns: int | None = None  # start of the 24 h window; None when the view does not give it
 
 
 Runner = Callable[[list[str]], str]
@@ -174,7 +175,7 @@ def run_near(args: list[str]) -> str:
     if os.environ.get("LEASH_DEBUG"):
         print(f"--- near stderr ---\n{scrub(stderr)}\n--- near stdout ---\n{scrub(stdout)}")
     if proc.returncode != 0:
-        raise ChainError(f"near CLI failed: {scrub(_tail(stderr + stdout, 500))}")
+        raise ChainError(f"near CLI failed: {_tail(scrub(stderr + stdout), 500)}")
     return stderr + STDOUT_SENTINEL + stdout
 
 
@@ -236,6 +237,7 @@ class Vault:
                 agent_paused=bool(policy["paused"]),
                 all_paused=paused_all is True,
                 balance=int(balance),  # type: ignore[arg-type]
+                window_start_ns=int(policy["window_start_ns"]) if policy.get("window_start_ns") is not None else None,
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ChainError(f"unexpected vault view output: {exc!r}") from exc

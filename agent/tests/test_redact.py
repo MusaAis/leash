@@ -89,5 +89,25 @@ class NothingPrivateIsPrinted(unittest.TestCase):
         self.assertNotIn(RECIPIENT, str(ctx.exception))
 
 
+
+class ScrubBeforeCut(unittest.TestCase):
+    def test_a_value_cut_by_the_tail_is_still_hidden(self):
+        from leash_agent import chain
+
+        proc = mock.Mock(returncode=1, stdout=RECIPIENT + "y" * 496, stderr="")
+        with mock.patch.dict("os.environ", ENV), mock.patch.object(chain.subprocess, "run", return_value=proc):
+            with self.assertRaises(chain.ChainError) as ctx:
+                chain.run_near(["near"])
+        self.assertNotIn(RECIPIENT[-4:], str(ctx.exception))
+
+    def test_a_value_cut_by_the_panic_line_limit_is_still_hidden(self):
+        from leash_agent import callpath
+
+        raw = "Error: panicked " + "y" * 272 + RECIPIENT
+        with mock.patch.dict("os.environ", ENV):
+            text = callpath._panic_text(raw)
+        self.assertNotIn("0xAbCdEf", text)
+
+
 if __name__ == "__main__":
     unittest.main()

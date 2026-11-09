@@ -51,7 +51,11 @@ echo "Waiting for the refund receipt..."
 sleep 20
 after="$(vault_balance)"
 spent_after="$(agent_spent)"
-restored="$(python3 -c 'import sys; a,b=int(sys.argv[1]),int(sys.argv[2]); print("yes" if abs(a-b)<=10**22 else "no")' "${before:-0}" "${after:-1}" 2>/dev/null || echo error)"
+if [ -z "$before" ] || [ -z "$after" ]; then
+  restored="error"
+else
+  restored="$(python3 -c 'import sys; a,b=int(sys.argv[1]),int(sys.argv[2]); print("yes" if abs(a-b)<=10**22 else "no")' "$before" "$after" 2>/dev/null || echo error)"
+fi
 check "vault balance restored after the failed transfer" yes "$restored"
 burned="$(python3 -c 'import sys; print(int(sys.argv[2])-int(sys.argv[1]))' "${spent_before:-0}" "${spent_after:-0}" 2>/dev/null || echo error)"
 check "daily cap stays consumed" "200000000000000000000000" "$burned"

@@ -134,7 +134,7 @@ def local_key_files(account: str, network: str, home: Path) -> list[tuple[Path, 
 
 
 def verify_local(cfg: Config, fetch: Callable[[str, str], object], home: Path, env: Mapping[str, str] | None, out) -> int:
-    """Mainnet, read-only: the server may hold function-call keys as planned and no full-access key. Exit 1 on any problem."""
+    """Mainnet, read-only: this machine may hold function-call keys and no full-access key. Exit 1 on any problem."""
     known, problems = known_full_access(env), False
     for account, methods, allowance in plan(cfg):
         try:
@@ -152,7 +152,7 @@ def verify_local(cfg: Config, fetch: Callable[[str, str], object], home: Path, e
             if public not in chain:
                 out(f"{account}: key file {path.name} holds a key that is not on the account")
             elif chain[public]:
-                out(f"{account}: FULL-ACCESS KEY FILE on this machine ({path.name}). The server must hold function-call keys only")
+                out(f"{account}: FULL-ACCESS KEY FILE on this machine ({path.name}). Only function-call keys belong here")
                 problems = True
             else:
                 usable += 1
@@ -228,7 +228,9 @@ def link_account_file(cfg: Config, answers: dict[str, object], home: Path) -> li
         if len(usable) != 1:
             lines.append(f"{account}: {len(usable)} function-call key files found, not exactly one; {target.name} was not written")
             continue
-        shutil.copyfile(usable[0], target)
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)  # private from the first byte
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(usable[0].read_bytes())
         os.chmod(target, 0o600)
         lines.append(f"{account}: copied the function-call key file to {target.name} so the CLI finds it")
     return lines

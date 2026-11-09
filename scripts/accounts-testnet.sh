@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Creates the testnet accounts used by the demo, funded by the testnet faucet.
+# The vault, owner, agent and guardian are funded by the faucet. The payee and the attacker only receive
+# funds, so they are created by the owner account with a small balance (LEASH_SMALL_FUND, default 0.1 NEAR) and
+# need no faucet call.
 # Safe to run again: accounts that already exist are skipped.
 # Retries when the faucet is rate limited, and moves aside key files left by a failed attempt.
 # The ghost account is never created on purpose (see demo step 10).
@@ -21,6 +24,23 @@ for id in "$VAULT" "$OWNER" "$AGENT" "$GUARDIAN" "$PAYEE" "$ATTACKER"; do
     printf '%s\n' "$summary" | tail -5
     exit 1
   fi
+  # The payee and the attacker are created by the owner account, so the faucet is not used for them.
+  if [ "$id" = "$PAYEE" ] || [ "$id" = "$ATTACKER" ]; then
+    cred_dir="${HOME}/.near-credentials/${NETWORK}"
+    for stale in "$cred_dir/$id.json" "$cred_dir/$id"; do
+      if [ -e "$stale" ]; then
+        mv "$stale" "$stale.stale-$(date +%s)"
+        MOVED+=("$stale")
+        echo "Moved aside a stale key file: $stale"
+      fi
+    done
+    echo "Creating $id from $OWNER with ${LEASH_SMALL_FUND:-0.1 NEAR}"
+    near account create-account fund-myself "$id" "${LEASH_SMALL_FUND:-0.1 NEAR}" \
+      autogenerate-new-keypair --signature-scheme ed25519 save-to-legacy-keychain \
+      sign-as "$OWNER" network-config "$NETWORK" sign-with-legacy-keychain send \
+      || { echo "Could not create $id from $OWNER. Check the owner balance, then run make accounts-testnet again."; exit 1; }
+    continue
+  fi
   # The faucet answers 429 when it is busy. Wait and retry before giving up.
   created=no
   for attempt in 1 2 3 4 5; do
@@ -36,7 +56,7 @@ for id in "$VAULT" "$OWNER" "$AGENT" "$GUARDIAN" "$PAYEE" "$ATTACKER"; do
     done
     echo "Creating $id (attempt $attempt of 5)"
     if near account create-account sponsor-by-faucet-service "$id" \
-        autogenerate-new-keypair save-to-legacy-keychain \
+        autogenerate-new-keypair --signature-scheme ed25519 save-to-legacy-keychain \
         network-config "$NETWORK" create; then
       created=yes
       break

@@ -14,9 +14,15 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 1
 fi
 
+if git rev-parse -q --verify "refs/tags/${version}" >/dev/null || git ls-remote --exit-code --tags origin "${version}" >/dev/null 2>&1; then
+  echo "Tag ${version} already exists."
+  exit 1
+fi
+
 make check
 git push -u origin "$branch"
 git checkout main
+git pull --ff-only origin main
 git merge --no-ff "$branch" -m "merge: ${branch}"
 git push
 git tag -a "$version" -m "$title"

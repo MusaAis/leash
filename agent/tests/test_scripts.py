@@ -139,5 +139,158 @@ class LockVaultScript(unittest.TestCase):
         self.assertFalse(self.log.exists())
 
 
+class ConfigAccountNames(unittest.TestCase):
+    def names(self, **env):
+        base = {k: v for k, v in os.environ.items() if k not in ("NETWORK", "LEASH_PREFIX")}
+        out = subprocess.run(
+            ["bash", "-c", 'source scripts/config.sh; echo "$VAULT $OWNER $AGENT $GUARDIAN $PAYEE $ATTACKER $GHOST"'],
+            cwd=ROOT, env={**base, **env}, capture_output=True, text=True, check=True,
+        )
+        return out.stdout.split()
+
+    def test_mainnet_names_end_in_near(self):
+        names = self.names(NETWORK="mainnet", LEASH_PREFIX="leash")
+        self.assertEqual(names[0], "leash-vault.near")
+        self.assertTrue(all(n.endswith(".near") for n in names), names)
+
+    def test_an_unknown_network_is_refused(self):
+        out = subprocess.run(
+            ["bash", "-c", "source scripts/config.sh; echo reached"],
+            cwd=ROOT, env={**os.environ, "NETWORK": "foo"}, capture_output=True, text=True,
+        )
+        self.assertNotEqual(out.returncode, 0)
+        self.assertNotIn("reached", out.stdout)
+        self.assertIn("NETWORK must be testnet or mainnet", out.stderr)
+
+    def test_testnet_scripts_refuse_mainnet_even_with_the_mainnet_flag(self):
+        for script in ("accounts-testnet.sh", "deploy-testnet.sh", "demo-testnet.sh", "policy-testnet.sh"):
+            for flag in ({}, {"LEASH_ALLOW_MAINNET": "1"}):
+                env = {**os.environ, "NETWORK": "mainnet", "LEASH_PREFIX": "leash", **flag}
+                out = subprocess.run(["bash", "scripts/" + script], cwd=ROOT, env=env, capture_output=True, text=True)
+                with self.subTest(script=script, flag=bool(flag)):
+                    self.assertEqual(out.returncode, 1)
+                    self.assertIn("testnet only", out.stderr)
+
+    def test_testnet_is_the_default_and_names_end_in_testnet(self):
+        names = self.names(LEASH_PREFIX="demo")
+        self.assertEqual(names[0], "demo-vault.testnet")
+        self.assertTrue(all(n.endswith(".testnet") for n in names), names)
+
+
+class AccountScriptKeyScheme(unittest.TestCase):
+    def test_account_creation_names_the_signature_scheme(self):
+        text = (ROOT / "scripts" / "accounts-testnet.sh").read_text()
+        self.assertIn("autogenerate-new-keypair --signature-scheme ed25519 save-to-legacy-keychain", text)
+
+
+class ReceivingAccountsAvoidTheFaucet(unittest.TestCase):
+    """Runs scripts/accounts-testnet.sh with a fake `near` that logs its arguments."""
+
+    def run_script(self, existing):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        bin_dir = Path(tmp.name) / "bin"
+        bin_dir.mkdir()
+        log = Path(tmp.name) / "calls.txt"
+        shim = bin_dir / "near"
+        shim.write_text(
+            "#!/bin/sh\n"
+            f'echo "$*" >> "{log}"\n'
+            'if [ "$2" = view-account-summary ]; then\n'
+            f'  case " {existing} " in *" $3 "*) exit 0 ;; esac\n'
+            '  echo "account $3 does not exist"; exit 1\n'
+            "fi\n"
+            "exit 0\n"
+        )
+        shim.chmod(0o755)
+        env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", HOME=tmp.name, LEASH_PREFIX="z")
+        env.pop("NETWORK", None)
+        out = subprocess.run(["bash", "scripts/accounts-testnet.sh"], cwd=ROOT, env=env, capture_output=True, text=True)
+        calls = log.read_text().splitlines() if log.exists() else []
+        return out, calls
+
+    def test_payee_and_attacker_are_created_by_the_owner_not_the_faucet(self):
+        out, calls = self.run_script("z-vault.testnet z-owner.testnet z-agent.testnet z-guardian.testnet")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertFalse([c for c in calls if "sponsor-by-faucet-service" in c], calls)
+        for name in ("z-payee.testnet", "z-attacker.testnet"):
+            created = [c for c in calls if "create-account fund-myself " + name in c]
+            self.assertEqual(len(created), 1, calls)
+            self.assertIn("sign-as z-owner.testnet", created[0])
+            self.assertIn("0.1 NEAR", created[0])
+            self.assertIn("--signature-scheme ed25519", created[0])
+
+    def test_the_other_accounts_still_use_the_faucet(self):
+        out, calls = self.run_script("")
+        faucet = [c for c in calls if "sponsor-by-faucet-service" in c]
+        self.assertEqual(len(faucet), 4, calls)
+        self.assertFalse([c for c in faucet if "payee" in c or "attacker" in c], faucet)
+
+
+class SmokeScript(unittest.TestCase):
+    def test_smoke_deploys_the_file_and_sets_a_test_route(self):
+        text = (ROOT / "scripts" / "smoke-testnet.sh").read_text()
+        self.assertNotIn("make deploy-testnet", text)
+        self.assertIn("scripts/deploy-testnet.sh", text)
+        self.assertIn("LEASH_ROUTE_RECIPIENT", text)
+        self.assertIn("scripts/vault-has-code.sh", text)
+        self.assertNotIn("grep -qi", text)
+
+
+class VaultHasCode(unittest.TestCase):
+    """Runs scripts/vault-has-code.sh with a fake `near` that prints a canned account summary."""
+
+    SHA = "18f112959fc2a6ec4a83489803589c83872c43564e96cd94ac70df1f1113dff0"
+    B58 = "2gMzTHTr2TwtwAaHsXZbKH9nBLi2ZfU9HLMVHG82B8KZ"
+
+    def run_script(self, answers, tries="3"):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        bin_dir = Path(tmp.name) / "bin"
+        bin_dir.mkdir()
+        for i, text in enumerate(answers):
+            (Path(tmp.name) / f"a{i}").write_text(text)
+        counter = Path(tmp.name) / "n"
+        shim = bin_dir / "near"
+        shim.write_text(
+            "#!/bin/sh\n"
+            f'n=$(cat "{counter}" 2>/dev/null || echo 0)\n'
+            f'last={len(answers) - 1}\n'
+            '[ "$n" -gt "$last" ] && n=$last\n'
+            f'cat "{tmp.name}/a$n"\n'
+            f'echo $((n + 1)) > "{counter}"\n'
+        )
+        shim.chmod(0o755)
+        env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", LEASH_CODE_WAIT="0")
+        env.pop("NETWORK", None)
+        return subprocess.run(
+            ["bash", "scripts/vault-has-code.sh", "v.testnet", self.SHA, tries],
+            cwd=ROOT, env=env, capture_output=True, text=True,
+        )
+
+    def test_hex_hash_matches(self):
+        out = self.run_script([f"Contract (SHA-256 checksum hex): {self.SHA}\n"])
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_base58_hash_matches(self):
+        out = self.run_script([f"Contract hash: {self.B58}\n"])
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_a_lagging_read_is_retried(self):
+        out = self.run_script(["Contract: none\n", f"Contract hash: {self.SHA}\n"])
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_another_hash_fails_and_shows_the_lines(self):
+        out = self.run_script(["Contract hash: FwEhAR96xHdsMmMrHM4vqNJgKNoH66VapxMY19AeXzne\n"], tries="2")
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("does not match", out.stderr)
+        self.assertIn("FwEhAR96", out.stderr)
+
+    def test_a_bad_sha_is_refused(self):
+        out = subprocess.run(["bash", "scripts/vault-has-code.sh", "v.testnet", "nothex"],
+                             cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(out.returncode, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

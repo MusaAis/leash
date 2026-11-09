@@ -34,10 +34,26 @@ The agent account holds only gas money; funds stay in the vault. Model output is
 
 ### Keys and ownership
 
+- `set_policy` refuses an agent that is the owner, the vault, the guardian or the wNEAR contract. `set_intents_config` refuses a guardian or wNEAR contract that is the owner, the vault or an agent, and refuses the same account for both.
+
 - The owner is fixed at deploy and there is no ownership transfer. Losing the owner key locks the funds. An offline backup key on the owner account is the recovery practice.
 - An owner full-access key can reset an agent's daily counter. `remove_agent` deletes the policy and its counter, and `set_policy` then recreates it from zero. A function-call key cannot do either, because both need 1 yoctoNEAR. `set_policy` alone keeps the counter.
 - The mainnet vault is not locked. See [Current mainnet state](#current-mainnet-state).
-- Contract 0.2.0 changes the state layout and has no `migrate`. It is deployed fresh, never over an older vault.
+- Contract 0.3.0 changes the state layout of 0.2.0 and has no `migrate`. It is deployed fresh, never over an older vault.
+
+### Decision log and views
+
+- Every allowed and denied call of `spend` and `spend_intent` writes its event and extends a hash chain: `head = sha256(previous head || event text)`, starting from 32 zero bytes. `get_head_hash` returns the head as 64 lowercase hex characters.
+- `scripts/replay_head.py` replays a file of event lines against the head and prints `chain OK` or `chain BROKEN`. An altered, missing, reordered or extra line gives a different head.
+- The chain covers the decisions of `spend` and `spend_intent`. Owner events (policy, funds, pauses, routes, configuration, approvals) are not chained.
+- A call that reverts, such as one from an account without a policy or one with too little gas, changes no state and leaves no trace in the chain.
+- The chain shows that a list of events is complete and unaltered against the on-chain head. It says nothing about where the list was fetched.
+- `would_spend` and `would_spend_intent` run the same check function as the real methods and return `allowed` or the denial reason. They cannot see the caller or the attached gas.
+
+### Panic key
+
+- `make panic-key` adds a function-call key to the owner account. It is limited to the vault and to the methods `pause_agent` and `pause_all`.
+- Owner methods that resume or move funds need exactly 1 yoctoNEAR, which a function-call key cannot attach, and the key's method list excludes them. See [testnet proof](testnet-proof.md).
 
 ### Cross-chain path (guardian)
 

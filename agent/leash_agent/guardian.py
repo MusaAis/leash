@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
-from .chain import Snapshot
+from .chain import ChainError, Snapshot
 from .intents import (
     DEFAULT_DEADLINE_MINUTES, DEFAULT_SLIPPAGE_BPS, TERMINAL, IntentsError, OneClick, QuoteRejected,
     QuoteRequest, VerifiedQuote, build_quote_request, parse_iso, utc_now, verify_quote_response,
@@ -62,12 +62,9 @@ class StoredRoutes:
 
     def __init__(self, read: Callable[[str, dict], object], expect: Route | None = None) -> None:
         self._read, self._expect = read, expect
-        self._cache: dict[tuple[str, int], Route] = {}
 
     def get(self, agent: str, route_id: int) -> Route:
-        key = (agent, route_id)
-        if key in self._cache:
-            return self._cache[key]
+        """Reads the vault on every call, so a route the owner replaced is never quoted from an old copy."""
         raw = self._read("get_routes", {"agent": agent})
         if not isinstance(raw, list) or not 0 <= route_id < len(raw):
             raise Refused(f"unknown route {route_id}: the vault holds no such route for {agent}")
@@ -78,7 +75,6 @@ class StoredRoutes:
         want = self._expect
         if want is not None and ((want.dest_asset and want.dest_asset != route.dest_asset) or (want.recipient and want.recipient != route.recipient)):
             raise Refused(f"the route in .env differs from route {route_id} stored in the vault; fix .env or run intents-routes")
-        self._cache[key] = route
         return route
 
 
@@ -87,21 +83,45 @@ STORAGE_DEPOSIT = 1_250_000_000_000_000_000_000
 INTENT_OVERHEAD = 2 * STORAGE_DEPOSIT
 
 
-def intent_denial(snap: Snapshot, amount: int) -> str | None:
-    """The reason the vault would deny `spend_intent`, in the contract's order, or None. (Allowlist: not used.)"""
-    if snap.all_paused:
-        return "all_paused"
-    if snap.agent_paused:
-        return "agent_paused"
-    if amount <= 0:
-        return "zero_amount"
-    if amount > snap.per_tx_cap:
-        return "over_per_tx_cap"
-    if snap.spent + amount + INTENT_OVERHEAD > snap.daily_cap:
+# A valid implicit account id that is no role of the vault; the check view needs some deposit account.
+PROBE_DEPOSIT = "0" * 64
+DAY_NS = 24 * 3600 * 10**9  # the contract's fixed daily window
+# Reasons the vault's check view can return (`no_policy` is view-only). `no_approval` and `allowed` pass.
+VIEW_REFUSALS = frozenset({
+    "intents_not_configured", "all_paused", "agent_paused", "zero_amount", "unknown_route", "over_per_tx_cap",
+    "over_daily_cap", "insufficient_funds", "no_policy",
+})
+VIEW_PASSES = frozenset({"allowed", "no_approval"})
+
+
+def vault_denial(view: Callable[[str, dict], object], agent: str, route_id: int, amount: int) -> str | None:
+    """Ask the vault's check view about reasons that do not depend on an approval. Anything unclear refuses."""
+    args = {"agent": agent, "route_id": route_id, "deposit_account": PROBE_DEPOSIT, "amount": str(amount)}
+    try:
+        answer = view("would_spend_intent", args)
+    except ChainError as exc:
+        raise Refused(f"the vault's check could not be read, so nothing was asked of 1Click: {exc}") from exc
+    if not isinstance(answer, str) or answer not in VIEW_REFUSALS | VIEW_PASSES:
+        raise Refused("the vault's check returned an answer the guardian does not know, so nothing was asked of 1Click")
+    return None if answer in VIEW_PASSES else answer
+
+
+def budget_denial(snap: Snapshot, amount: int, now_ns: int) -> str | None:
+    """The two reasons the check view cannot show before an approval exists: `over_daily_cap`, `insufficient_funds`."""
+    expired = snap.window_start_ns is not None and now_ns - snap.window_start_ns >= DAY_NS
+    spent = 0 if expired else snap.spent
+    if spent + amount + INTENT_OVERHEAD > snap.daily_cap:
         return "over_daily_cap"
     if amount + INTENT_OVERHEAD > snap.balance:  # `balance` is the vault's available balance, already net of reserve
         return "insufficient_funds"
     return None
+
+
+def intent_precheck(
+    view: Callable[[str, dict], object], snapshot: Callable[[], Snapshot], agent: str, route_id: int, amount: int, now_ns: int,
+) -> str | None:
+    """The reason the vault would deny `spend_intent` for this route and amount, or None. The vault decides again on the call."""
+    return vault_denial(view, agent, route_id, amount) or budget_denial(snapshot(), amount, now_ns)
 
 
 class GuardianLog:
@@ -164,12 +184,12 @@ class Issued:
 
 
 class Guardian:
-    def __init__(self, *, agent: str, vault_account: str, snapshot: Callable[[], Snapshot], routes: RouteSource,
+    def __init__(self, *, agent: str, vault_account: str, snapshot: Callable[[], Snapshot], view: Callable[[str, dict], object], routes: RouteSource,
                  oneclick: OneClick, log: GuardianLog, other_accounts: tuple[str, ...] = (),
                  now: Callable[[], datetime.datetime] = utc_now, max_per_hour: int = DEFAULT_MAX_PER_HOUR,
                  slippage_bps: int = DEFAULT_SLIPPAGE_BPS, deadline_minutes: int = DEFAULT_DEADLINE_MINUTES,
                  sleep: Callable[[float], None] = time.sleep) -> None:
-        self.agent, self.vault_account, self._snapshot, self.routes = agent, vault_account, snapshot, routes
+        self.agent, self.vault_account, self._snapshot, self._view, self.routes = agent, vault_account, snapshot, view, routes
         self.oneclick, self.log, self.other_accounts, self._now = oneclick, log, other_accounts, now
         self.max_per_hour, self.slippage_bps, self.deadline_minutes, self._sleep = (
             max_per_hour, slippage_bps, deadline_minutes, sleep)
@@ -198,7 +218,7 @@ class Guardian:
     def quote(self, route_id: int, amount: int) -> Issued:
         """A real quote (`dry: false`): refuse early, ask 1Click, verify, log. One call per approval attempt."""
         route_id, amount, route = self._inputs(route_id, amount)
-        reason = intent_denial(self._snapshot(), amount)
+        reason = intent_precheck(self._view, self._snapshot, self.agent, route_id, amount, int(self._now().timestamp() * 10**9))
         if reason:
             self.log.append({"event": "refused", "ts": self._now().isoformat(), "agent": self.agent,
                              "route_id": route_id, "amount": str(amount), "reason": reason})

@@ -4,13 +4,19 @@
 
 NETWORK="${NETWORK:-testnet}"
 PREFIX="${LEASH_PREFIX:-leashdemo}"
-VAULT="${PREFIX}-vault.${NETWORK}"
-OWNER="${PREFIX}-owner.${NETWORK}"
-AGENT="${PREFIX}-agent.${NETWORK}"
-GUARDIAN="${PREFIX}-guardian.${NETWORK}"
-PAYEE="${PREFIX}-payee.${NETWORK}"
-ATTACKER="${PREFIX}-attacker.${NETWORK}"
-GHOST="${PREFIX}-ghost.${NETWORK}"   # intentionally never created
+# Account ids end in `.near` on mainnet and in the network name elsewhere.
+case "$NETWORK" in
+  testnet) SUFFIX="testnet" ;;
+  mainnet) SUFFIX="near" ;;
+  *) echo "NETWORK must be testnet or mainnet (got: $NETWORK)." >&2; exit 1 ;;
+esac
+VAULT="${PREFIX}-vault.${SUFFIX}"
+OWNER="${PREFIX}-owner.${SUFFIX}"
+AGENT="${PREFIX}-agent.${SUFFIX}"
+GUARDIAN="${PREFIX}-guardian.${SUFFIX}"
+PAYEE="${PREFIX}-payee.${SUFFIX}"
+ATTACKER="${PREFIX}-attacker.${SUFFIX}"
+GHOST="${PREFIX}-ghost.${SUFFIX}"   # intentionally never created
 WASM="contract/target/near/leash.wasm"
 GAS="30 Tgas"
 YOCTO="1 yoctoNEAR"

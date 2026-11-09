@@ -13,6 +13,7 @@ from leash_agent.__main__ import main
 from leash_agent.chain import STDOUT_SENTINEL, ChainError, Snapshot
 from leash_agent.guardian import GuardianLog
 from leash_agent.intents import iso, utc_now
+from tests.test_guardian import fake_check
 from tests.test_callpath import HEX64, RECIPIENT, make_config, payload, value_after
 
 NEAR = 10**24
@@ -33,6 +34,8 @@ class FakeVault:
     def view(self, method, args=None):
         if self.view_error:
             raise self.view_error
+        if method == "would_spend_intent":
+            return fake_check(self.snapshot_value, args)
         return self.approvals if method == "get_approvals" else []
 
     def snapshot(self):
@@ -52,6 +55,9 @@ class Chain:
             self.views.append(args[5])
             from tests.test_intents import ASSET as route_asset
             stored = self.routes if self.routes is not None else [{"dest_asset": route_asset, "recipient": RECIPIENT}]
+            if args[5] == "would_spend_intent":
+                amount = int(json.loads(args[7])["amount"])
+                return STDOUT_SENTINEL + json.dumps("all_paused" if self.paused else "over_per_tx_cap" if amount > NEAR // 2 else "no_approval")
             answer = {
                 "get_policy": {"per_tx_cap": str(NEAR // 2), "daily_cap": str(NEAR), "spent_in_window": "0", "allowlist": [], "paused": False},
                 "is_paused_all": self.paused, "get_available_balance": str(self.balance), "get_routes": stored,
@@ -157,6 +163,13 @@ class PrepareApproval(Base):
             self.assertLess(expires - now_ns, 30 * 60 * 10**9)
         self.assertEqual(payload(self.approve(max_minutes=5)[0])["expires_ns"], str(now_ns + 5 * 60 * 10**9))
 
+    def test_zero_or_negative_minutes_are_refused_not_defaulted(self):
+        self.add(quote_entry(self.cfg, self.now))
+        for value in (0, -1):
+            with self.assertRaisesRegex(callpath.CallPathError, "--minutes must be"):
+                self.approve(max_minutes=value)
+        self.assertEqual(self.events("approval_sent"), [])
+
     def test_a_deposit_address_of_the_wrong_shape_is_refused(self):
         for bad in ("AB" * 32, "ab" * 31, "g.near", "", None):
             if self.log.path.exists():
@@ -202,7 +215,7 @@ class PrepareApproval(Base):
             vault = FakeVault(state)
             with self.assertRaisesRegex(callpath.CallPathError, reason):
                 self.approve(record=True, vault=vault)
-            self.assertEqual(vault.reads, 1, reason)
+            self.assertEqual(vault.reads, 1 if reason in ("over_daily_cap", "insufficient_funds") else 0, reason)
         self.assertEqual(self.events("approval_sent"), [])
         self.assertEqual([e["reason"] for e in self.events("refused")], list(cases))
 

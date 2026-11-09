@@ -10,7 +10,7 @@ import sys
 from . import __version__
 from .agent import Agent
 from .attacks import build_attacks, run_suite
-from . import callpath, keys, swap
+from . import callpath, keys, panic, swap
 from .brain import Brain, list_models, missing_model_note
 from .chain import ChainError, Vault, near_to_yocto
 from .chain import run_near
@@ -51,7 +51,7 @@ def intents_dry(cfg, vault, amount_near, oneclick) -> int:
         asset = found[0]["assetId"]
     routes = EnvRoutes.from_env(asset)
     guardian = Guardian(
-        agent=cfg.agent, vault_account=cfg.vault, snapshot=vault.snapshot, routes=routes,
+        agent=cfg.agent, vault_account=cfg.vault, snapshot=vault.snapshot, view=vault.view, routes=routes,
         oneclick=oneclick, log=GuardianLog.from_env(), other_accounts=(cfg.owner,),
     )
     try:
@@ -140,7 +140,7 @@ def intents_quote(cfg, args, oneclick, runner) -> int:
     expect = Route(os.environ.get("LEASH_ROUTE_DEST_ASSET", ""), os.environ.get("LEASH_ROUTE_RECIPIENT", ""))
     routes = StoredRoutes(vault.view, expect)  # the vault's route is the truth; .env may only confirm it
     guardian = Guardian(
-        agent=cfg.agent, vault_account=cfg.vault, snapshot=vault.snapshot, routes=routes,
+        agent=cfg.agent, vault_account=cfg.vault, snapshot=vault.snapshot, view=vault.view, routes=routes,
         oneclick=oneclick, log=GuardianLog.from_env(), other_accounts=(cfg.owner, cfg.guardian, cfg.wnear),
     )
     try:
@@ -182,6 +182,8 @@ def intents_call(cfg, args, runner) -> int:
         return 0
     extra, hooks = [], {}
     try:
+        if cmd == "panic-key":
+            return panic.run(cfg, confirmed=args.yes, runner=runner)
         if cmd == "intents-keys":
             return keys.run(cfg, confirmed=args.yes, runner=runner, aside=args.aside)
         if cmd == "intents-config":
@@ -196,7 +198,7 @@ def intents_call(cfg, args, runner) -> int:
                 if not args.deposit_account:
                     raise callpath.CallPathError("on testnet pass --deposit-account (1Click has no testnet, so there is no saved quote)")
                 built = callpath.approve_intent_args(
-                    cfg, args.route, args.deposit_account, args.amount, args.minutes or 20, args.quote_hash or callpath.REHEARSAL_QUOTE_HASH)
+                    cfg, args.route, args.deposit_account, args.amount, 20 if args.minutes is None else args.minutes, args.quote_hash or callpath.REHEARSAL_QUOTE_HASH)
                 accounts = [cfg.vault, cfg.guardian, cfg.agent, args.deposit_account]
             else:
                 accounts = [cfg.vault, cfg.guardian, cfg.agent]
@@ -276,6 +278,8 @@ def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, mod
     keyp = sub.add_parser("intents-keys", help="testnet: add the guardian and agent function-call keys (plan only without --yes); mainnet: read-only check")
     keyp.add_argument("--yes", action="store_true")
     keyp.add_argument("--aside", action="store_true", help="testnet: after adding, move creation-key files to a folder beside the keychain (the files are moved, not deleted)")
+    panicp = sub.add_parser("panic-key", help="testnet: add a pause-only function-call key to the owner account (plan only without --yes); mainnet: read-only check")
+    panicp.add_argument("--yes", action="store_true")
     for name, text in (("intents-config", "owner: set the wNEAR contract and the guardian (1 yocto; revokes approvals)"),
                        ("intents-routes", "owner: set route 0 from LEASH_ROUTE_DEST_ASSET and LEASH_ROUTE_RECIPIENT (1 yocto)")):
         owner = sub.add_parser(name, help=text)
@@ -330,7 +334,7 @@ def main(argv: list[str] | None = None, *, cfg=None, vault=None, brain=None, mod
     try:
         if args.command == "intents-quote":
             return intents_quote(cfg, args, oneclick or OneClick.from_env(), runner)
-        if args.command in ("intents-status", "intents-keys", "intents-config", "intents-routes", "intents-approve", "intents-spend"):
+        if args.command in ("intents-status", "intents-keys", "panic-key", "intents-config", "intents-routes", "intents-approve", "intents-spend"):
             return intents_call(cfg, args, runner)
         if args.command == "intents-tokens":
             return intents_tokens(args.symbol, args.chain, oneclick or OneClick.from_env())

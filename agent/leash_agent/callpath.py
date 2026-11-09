@@ -171,7 +171,7 @@ def _event_reason(events: list[dict], name: str) -> str | None:
 def _panic_text(raw: str) -> str:
     for line in raw.splitlines():
         if re.search(r"panick|ExecutionError|Failure", line, re.I):
-            return line.strip(" │├└─-\t")[:300]
+            return scrub(line.strip(" │├└─-\t"))[:300]
     return "no panic message in the output (the CLI output of a failed on-chain call is unverified)"
 
 

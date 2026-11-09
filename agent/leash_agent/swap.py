@@ -11,7 +11,7 @@ from . import callpath
 from .callpath import CallPathError
 from .chain import ChainError, Vault, near_to_yocto, parse_call_output
 from .config import Config
-from .guardian import DEFAULT_MAX_PER_HOUR, GuardianLog, intent_denial
+from .guardian import DEFAULT_MAX_PER_HOUR, GuardianLog, Refused, intent_precheck
 from .intents import iso, parse_iso, utc_now
 
 HEX64 = re.compile(r"[0-9a-f]{64}")
@@ -84,7 +84,10 @@ def prepare_approval(
         deposit, response = quote.get("deposit_address"), quote.get("response")
         if not isinstance(deposit, str) or not HEX64.fullmatch(deposit) or not isinstance(response, dict):
             raise CallPathError("the saved quote has no deposit address of the expected shape (64 lowercase hex characters)")
-        minutes = min(callpath.MAX_APPROVAL_MINUTES, max_minutes or callpath.MAX_APPROVAL_MINUTES, int((deadline - now).total_seconds() // 60))
+        if max_minutes is not None and max_minutes < 1:
+            raise CallPathError(f"--minutes must be from 1 to {callpath.MAX_APPROVAL_MINUTES}")
+        limit = callpath.MAX_APPROVAL_MINUTES if max_minutes is None else max_minutes
+        minutes = min(callpath.MAX_APPROVAL_MINUTES, limit, int((deadline - now).total_seconds() // 60))
         if minutes < 1:
             raise CallPathError(f"the saved quote's deadline ({iso(deadline)}) has passed or is less than a minute away: ask for a new quote")
         if any(e.get("event") == "approval_sent" and e.get("deposit_address") == deposit and not _failed_after(entries, i, "approval", deposit)
@@ -103,7 +106,10 @@ def prepare_approval(
                 recent += 1
         if recent >= max_per_hour:
             raise CallPathError(f"rate_limit: {recent} approvals in the last hour (limit {max_per_hour})")
-        reason = intent_denial(vault.snapshot(), amount)  # fresh vault state, same order as the contract
+        try:
+            reason = intent_precheck(vault.view, vault.snapshot, cfg.agent, route_id, amount, _ns(now))  # fresh vault state
+        except Refused as exc:
+            raise CallPathError(str(exc)) from exc
         if reason:
             log.append({"event": "refused", "ts": now.isoformat(), "agent": cfg.agent, "route_id": route_id,
                         "amount": str(amount), "reason": reason})

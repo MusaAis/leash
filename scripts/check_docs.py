@@ -72,9 +72,9 @@ def check_test_counts() -> list[str]:
     agent = suite.countTestCases()
     contract = text("contract/src/lib.rs").count("#[test]")
     claims = [
-        ("README.md", r"Agent unit tests \| (\d+) passed", agent), ("README.md", r"Ran (\d+) tests", agent),
+        ("README.md", r"Ran (\d+) tests", agent),
         ("docs/STATE.md", r"(\d+) agent tests", agent),
-        ("README.md", r"Contract unit tests \| (\d+) passed", contract),
+        ("README.md", r"badge/agent%20tests-(\d+)%20passed", agent), ("README.md", r"badge/contract%20tests-(\d+)%20passed", contract),
         ("README.md", r"test result: ok\. (\d+) passed", contract), ("docs/STATE.md", r"(\d+) contract tests", contract),
     ]
     problems = []
@@ -86,15 +86,28 @@ def check_test_counts() -> list[str]:
     return problems
 
 
-def check_denial_reasons() -> list[str]:
-    source = text("contract/src/lib.rs")
-    body = source[source.index("pub fn spend"):source.index("match reason {")]
-    in_code = set(re.findall(r'Some\("([a-z_]+)"\)', body))
-    line = re.search(r"Denial reasons: ([^\n]+)", text("README.md"))
+def denial_reasons(source: str) -> set[str]:
+    start = source.find("fn check_spend(")
+    if start < 0:
+        return set()
+    end = source.find("\n}\n", start)
+    body = source[start:end if end >= 0 else len(source)]
+    return set(re.findall(r'Err\("([a-z_]+)"\)', body))
+
+
+def denial_problems(source: str, readme: str) -> list[str]:
+    in_code = denial_reasons(source)
+    if not in_code:
+        return ["no denial reasons found in the contract (expected `Err(\"reason\")` returns in fn check_spend)"]
+    line = re.search(r"Denial reasons: ([^\n]+)", readme)
     in_doc = set(re.findall(r"`([a-z_]+)`", line.group(1))) if line else set()
     if in_doc != in_code:
         return [f"README lists {sorted(in_doc)}, the contract has {sorted(in_code)}"]
     return []
+
+
+def check_denial_reasons() -> list[str]:
+    return denial_problems(text("contract/src/lib.rs"), text("README.md"))
 
 
 def check_attack_count() -> list[str]:
@@ -150,7 +163,7 @@ def check_links() -> list[str]:
 
 STALE = [r"not released", r"in progress", r"not deployed", r"placeholders?", r"to be measured", r"no LEASH contract",
          r"reported by", r"\(reported", r"reported, not shown", r"owner reports", r"owner's report", r"owner's statement",
-         r"inferred", r"unverified", r"not yet verified", r"rehearsal records", r"creation[ -]key"]
+         r"\breported\b", r"\buntested\b", r"inferred", r"unverified", r"not yet verified", r"rehearsal records", r"creation[ -]key"]
 ROLES = "|".join(["LE" + "AD", "Re" + "viewer", "Bui" + "lder", "Advi" + "ser"])
 PRIVATE = [r"\b(?:" + ROLES + r")\b", r"\bReview \d+\b", r"\b[A-Z]-\d{1,3}\b", r"\bP\d+-\d+\b", r"\bR\d+-\d+\b",
            r"\bPatch \d+\b", r"\b" + "Mu" + r"sa\b"]
@@ -168,10 +181,32 @@ def contract_part(source: str) -> str:
     return source[: source.index("#[cfg(test)]")] if "#[cfg(test)]" in source else source
 
 
-def interface_gaps(source: str, readme: str) -> list[str]:
+# Methods in the contract that the docs must not name until the tag below exists.
+UNRELEASED_UNTIL = "v0.3.2"
+UNRELEASED_METHODS: list[str] = []
+
+
+def contract_methods(source: str) -> list[str]:
     part = contract_part(source)
-    names = re.findall(r"^\s*pub fn (\w+)\(", part[part.index("pub fn new("):], re.M)
+    return re.findall(r"^\s*pub fn (\w+)\(", part[part.index("pub fn new("):], re.M)
+
+
+def interface_gaps(source: str, readme: str, skip: tuple[str, ...] | list[str] = ()) -> list[str]:
+    names = [n for n in contract_methods(source) if n not in skip]
     return [f"README has no entry for the contract method `{n}`" for n in names if not re.search(r"`%s[`(]" % n, readme)]
+
+
+def unreleased_problems(source: str, docs: dict[str, str], listed: list[str], until: str, tags: set[str]) -> list[str]:
+    methods = set(contract_methods(source))
+    problems = []
+    for name in listed:
+        if name not in methods:
+            problems.append(f"`{name}` is on the unreleased list but the contract has no such method")
+        problems += [f"{path} names `{name}` before {until} is tagged"
+                     for path, body in docs.items() if re.search(r"\b%s\b" % re.escape(name), body)]
+    if listed and tags and until in tags:
+        problems.append(f"{until} is tagged: empty the unreleased list and add the README entries")
+    return problems
 
 
 def event_gaps(source: str, readme: str) -> list[str]:
@@ -207,12 +242,35 @@ def wasm_problems(build_md: str, proof_md: str) -> list[str]:
     return problems
 
 
+MONTHS = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?"
+DATE_SHAPES = [
+    r"\b20\d\d-\d\d-\d\d\b",
+    r"\b20\d\d-\d\d\b",
+    r"\b20\d\d/\d\d?/\d\d?\b",
+    r"\b\d\d?/\d\d?/20\d\d\b",
+    r"\b\d\d?/\d\d?/\d\d\b",
+    r"\b\d\d?/20\d\d\b",
+    r"\b" + MONTHS + r" \d{1,2}(?:st|nd|rd|th)?(?:,? 20\d\d)?\b",
+    r"\b\d{1,2}(?:st|nd|rd|th)?(?: of)? " + MONTHS + r"(?:,? 20\d\d)?\b",
+    r"\b" + MONTHS + r",? 20\d\d\b",
+    r"\b20\d\d-" + MONTHS + r"-\d\d?\b",
+    r"\b" + MONTHS + r"-\d\d?-20\d\d\b",
+    r"\b20\d\d\.\d\d\.\d\d\b",
+    r"\b\d\d\.\d\d\.20\d\d\b",
+    r"\b\d\d\.\d\d\.\d\d\b",
+    r"\b\d\d-\d\d-20\d\d\b",
+    r"\b20\d\d(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\b",
+]
+
+
 def snapshot_problems(name: str, body: str) -> list[str]:
-    """Dated values live in the proof page: an ISO date may appear in links and code only."""
+    """Dated values live in a table row: a date may appear in links, code and tables only."""
     prose = re.sub(r"```.*?```", "", body, flags=re.S)
+    prose = re.sub(r"^\|.*$", "", prose, flags=re.M)
     prose = re.sub(r"`[^`\n]*`", "", prose)
     prose = re.sub(r"\[[^\]]*\]\([^)]*\)", "", prose)
-    return [f"{name} has a date in prose: {d}" for d in re.findall(r"\b20\d\d-\d\d-\d\d\b", prose)]
+    found = [m.group(0) for shape in DATE_SHAPES for m in re.finditer(shape, prose, re.I)]
+    return [f"{name} has a date in prose: {d}" for d in found]
 
 
 def slug_set(body: str) -> set[str]:
@@ -253,7 +311,13 @@ def check_private() -> list[str]:
 
 
 def check_interface() -> list[str]:
-    return interface_gaps(text("contract/src/lib.rs"), text("README.md"))
+    return interface_gaps(text("contract/src/lib.rs"), text("README.md"), UNRELEASED_METHODS)
+
+
+def check_unreleased() -> list[str]:
+    tags = set(subprocess.run(["git", "tag", "-l"], cwd=ROOT, capture_output=True, text=True).stdout.split())
+    docs = {d: text(d) for d in doc_paths()}
+    return unreleased_problems(text("contract/src/lib.rs"), docs, UNRELEASED_METHODS, UNRELEASED_UNTIL, tags)
 
 
 def check_events() -> list[str]:
@@ -262,6 +326,54 @@ def check_events() -> list[str]:
 
 def check_badge() -> list[str]:
     return badge_problems(text("README.md"), (ROOT / "docs/mainnet-proof.md").exists())
+
+
+def readme_pin_problems(readme: str, cargo_toml: str, toolchain_toml: str) -> list[str]:
+    row = re.search(r"Rust (\d+\.\d+\.\d+) and near-sdk =(\d+\.\d+\.\d+)", readme)
+    if not row:
+        return ["README has no row `Rust X.Y.Z and near-sdk =X.Y.Z` for the pinned build inputs"]
+    channel = re.search(r'channel\s*=\s*"([^"]+)"', toolchain_toml)
+    pins = set(re.findall(r'near-sdk[^\n]*"=(\d+\.\d+\.\d+)"', cargo_toml))
+    problems = []
+    if not channel or channel.group(1) != row.group(1):
+        problems.append(f"README says Rust {row.group(1)}, rust-toolchain.toml has {channel and channel.group(1)}")
+    if pins != {row.group(2)}:
+        problems.append(f"README says near-sdk ={row.group(2)}, Cargo.toml pins {sorted(pins)}")
+    for label, pattern, expected in (
+        ("Rust", r"badge/Rust-(\d+\.\d+\.\d+)-", channel and channel.group(1)),
+        ("near-sdk", r"badge/near--sdk-%3D(\d+\.\d+\.\d+)-", next(iter(pins)) if len(pins) == 1 else None),
+    ):
+        badge = re.search(pattern, readme)
+        if not badge:
+            problems.append(f"README has no {label} version badge at the top")
+        elif badge.group(1) != expected:
+            problems.append(f"README {label} badge says {badge.group(1)}, the pin is {expected}")
+    return problems
+
+
+CONTRACT_VERSION_PAGES = ("docs/security.md", "docs/adr/0005-intents-design-and-trust.md", "docs/deployment.md")
+
+
+def contract_version_problems(pages: dict[str, str], cargo_toml: str) -> list[str]:
+    """The first `contract X.Y.Z` on a guide page names the version in Cargo.toml (proof pages, STATE and CHANGELOG are history)."""
+    crate = re.search(r'^version\s*=\s*"(\d+\.\d+\.\d+)"', cargo_toml, re.M)
+    if not crate:
+        return ["contract/Cargo.toml has no version"]
+    problems = []
+    for name, body in pages.items():
+        for found in re.findall(r"\bcontract (\d+\.\d+\.\d+)", body, re.I):
+            if found != crate.group(1):
+                problems.append(f"{name} names contract {found}, Cargo.toml has {crate.group(1)}")
+    return problems
+
+
+def check_contract_version() -> list[str]:
+    return contract_version_problems({n: text(n) for n in CONTRACT_VERSION_PAGES}, text("contract/Cargo.toml"))
+
+
+
+def check_readme_pin() -> list[str]:
+    return readme_pin_problems(text("README.md"), text("contract/Cargo.toml"), text("contract/rust-toolchain.toml"))
 
 
 def check_pin() -> list[str]:
@@ -276,8 +388,12 @@ def check_wasm_facts() -> list[str]:
     return wasm_problems(text("docs/build.md"), text("docs/mainnet-proof.md"))
 
 
+SNAPSHOT_EXEMPT = {"docs/testnet-proof.md", "docs/mainnet-proof.md", "docs/STATE.md"}
+
+
 def check_snapshot() -> list[str]:
-    return snapshot_problems("docs/security.md", text("docs/security.md"))
+    pages = ["README.md", "SECURITY.md", *[d for d in doc_paths() if d not in SNAPSHOT_EXEMPT]]
+    return [p for page in dict.fromkeys(pages) for p in snapshot_problems(page, text(page))]
 
 
 def check_anchors() -> list[str]:
@@ -295,10 +411,13 @@ CHECKS = [
     ("no stale status phrases in the docs", check_stale),
     ("no private process terms in the docs", check_private),
     ("README lists every contract method", check_interface),
+    ("unreleased methods stay out of the docs until their tag", check_unreleased),
     ("README lists every contract event", check_events),
-    ("no dated balance in docs/security.md", check_snapshot),
+    ("no dates in prose outside proof pages", check_snapshot),
     ("README network badge matches the proofs", check_badge),
     ("near-sdk pin is stated in docs/build.md", check_pin),
+    ("README pinned build inputs match the toolchain files", check_readme_pin),
+    ("guide pages name the current contract version", check_contract_version),
     ("artifact hashes in docs/build.md match the mainnet proof", check_wasm_facts),
     ("heading anchors in links exist", check_anchors),
 ]
