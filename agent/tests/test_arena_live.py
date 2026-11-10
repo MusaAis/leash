@@ -309,6 +309,18 @@ class MainTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("testnet only", err)
 
+    def test_the_settings_file_is_read_and_a_bad_file_stops_the_start(self):
+        with tempfile.TemporaryDirectory() as d:
+            env_file = Path(d) / "arena.env"
+            env_file.write_text("LEASH_ARENA_ORIGINS=https://leash-near.vercel.app\n")
+            code, out, err = self.run_main(["--live", "--check"], {"LEASH_ARENA_DIR": d + "/s", "LEASH_ARENA_ENV": str(env_file)})
+            self.assertEqual(code, 0, err)
+            self.assertIn("origins 1", out)
+            env_file.write_text("LEASH_ARENA_ORIGINS=a\nLEASH_ARENA_ORIGINS=b\n")
+            code, _, err = self.run_main(["--live", "--check"], {"LEASH_ARENA_DIR": d + "/s", "LEASH_ARENA_ENV": str(env_file)})
+            self.assertEqual(code, 1)
+            self.assertIn("repeats a key", err)
+
     def test_modes_exclude_each_other_and_check_needs_live(self):
         self.assertEqual(self.run_main(["--demo", "--live"])[0], 2)
         self.assertEqual(self.run_main(["--demo", "--check"])[0], 2)
@@ -397,11 +409,12 @@ class ArenaScriptTests(unittest.TestCase):
             self.assertNotIn("KEY=", text)
 
     def test_make_targets_pass_hostile_values_as_data(self):
-        out = subprocess.run(["make", "-n", "arena-setup", 'TIER=x"; echo BAD; "'], cwd=ROOT,
-                             capture_output=True, text=True)
+        env = {k: v for k, v in os.environ.items() if k not in ("MAKELEVEL", "MAKEFLAGS", "MFLAGS")}
+        out = subprocess.run(["make", "-n", "--no-print-directory", "arena-setup", 'TIER=x"; echo BAD; "'],
+                             cwd=ROOT, env=env, capture_output=True, text=True)
         self.assertEqual(out.stdout.strip(), 'scripts/arena-setup.sh "$TIER"')
-        out = subprocess.run(["make", "-n", "arena-stop", "LEASH_ARENA_DIR=/tmp/x"], cwd=ROOT,
-                             capture_output=True, text=True)
+        out = subprocess.run(["make", "-n", "--no-print-directory", "arena-stop", "LEASH_ARENA_DIR=/tmp/x"],
+                             cwd=ROOT, env=env, capture_output=True, text=True)
         self.assertIn('"$ARENA_DIR/stop"', out.stdout)
 
 

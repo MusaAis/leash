@@ -6,7 +6,9 @@ import argparse
 import os
 import sys
 
-from leash_agent.config import Config
+from pathlib import Path
+
+from leash_agent.config import Config, EnvFileError, load_env_file
 
 from .demo import demo_arena
 from .live import LiveError, Settings, build_live_arena
@@ -15,11 +17,12 @@ from .server import make_server
 
 def _live(args) -> int:
     try:
+        load_env_file(Path(os.environ.get("LEASH_ARENA_ENV") or Path.home() / ".leash" / "arena.env"))
         settings = Settings.from_env()
         arena = build_live_arena(settings, Config.from_env())
         server = make_server(arena, "127.0.0.1", args.port, proxy_header=settings.proxy_header, mode="live",
                              allowed_origins=settings.origins)
-    except (LiveError, ValueError) as exc:
+    except (LiveError, EnvFileError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     tiers = ", ".join(f"{name}={tier.vault}" for name, tier in arena.tiers.items())
