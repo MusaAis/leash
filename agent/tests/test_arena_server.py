@@ -506,22 +506,28 @@ class DeadlineTests(ServerCase):
 class PerClientTests(ServerCase):
     per_client = 2
     exempt_loopback = False
-    io_timeout = 1.0
+    io_timeout = 3.0
 
     def test_one_client_cannot_hold_more_than_its_share_and_it_recovers(self):
         held = [socket.create_connection(("127.0.0.1", self.port), timeout=5) for _ in range(2)]
         try:
             time.sleep(0.2)
             extra = socket.create_connection(("127.0.0.1", self.port), timeout=5)
-            extra.sendall(b"GET /api/stats HTTP/1.0\r\n\r\n")
-            self.assertEqual(extra.recv(100), b"")
+            try:
+                extra.sendall(b"GET /api/stats HTTP/1.0\r\n\r\n")
+                answer = extra.recv(100)
+            except ConnectionResetError:
+                answer = b""  # closed before it was read: the same refusal
+            self.assertEqual(answer, b"")
             extra.close()
         finally:
             for sock in held:
                 sock.close()
-        time.sleep(1.5)
-        self.assertEqual(self.call("GET", "/api/stats")[0], 200)
+        deadline = time.time() + 5
+        while self.server._open and time.time() < deadline:
+            time.sleep(0.05)  # the handler threads release their slots just after they finish
         self.assertEqual(self.server._open, {})
+        self.assertEqual(self.call("GET", "/api/stats")[0], 200)
 
 
 class LoopbackExemptTests(ServerCase):
