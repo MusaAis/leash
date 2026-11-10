@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import threading
 import time
 import unicodedata
@@ -39,8 +40,21 @@ def clean_message(raw: object) -> str:
     return kept
 
 
+def client_bucket(client: str) -> str:
+    """The unit one visitor can control: an IPv4 address, or the /64 network of an IPv6 address."""
+    try:
+        address = ipaddress.ip_address(client)
+    except ValueError:
+        return str(client)
+    address = getattr(address, "ipv4_mapped", None) or address
+    if address.version == 6:
+        return str(ipaddress.ip_network(f"{address}/64", strict=False))
+    return str(address)
+
+
 def visitor_key(client: str, salt: bytes) -> str:
-    """A salted hash of the client address; the address itself is not stored anywhere."""
+    """A salted hash of the client's bucket; the address itself is not stored anywhere."""
+    client = client_bucket(client)
     if not isinstance(salt, bytes) or len(salt) < MIN_SALT_BYTES:
         raise ValueError(f"the salt must be at least {MIN_SALT_BYTES} bytes")
     return hashlib.sha256(salt + b"|" + str(client).encode()).hexdigest()[:16]

@@ -13,7 +13,7 @@ from unittest import mock
 from leash_arena.arena import Arena
 from leash_arena.attemptlog import AttemptLog
 from leash_arena.budget import ModelBudget
-from leash_arena.limits import Limiter
+from leash_arena.limits import Limiter, client_bucket, visitor_key
 from leash_arena.server import (FEED_MAX, MAX_BODY_BYTES, REJECTIONS, SECURITY_HEADERS, STATIC, format_near,
                                 Handler, make_server, parse_attempt_body)
 from tests.arena_fakes import BAIT, PAYEE, BrainSource, FakePayer, fortress, loose, refuse, spend
@@ -26,6 +26,10 @@ class ServerCase(unittest.TestCase):
     proxy_header = None
     io_timeout = 5.0
     max_connections = 64
+    allowed_origins = ()
+    request_deadline = 15.0
+    per_client = 4
+    exempt_loopback = True
 
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -40,7 +44,9 @@ class ServerCase(unittest.TestCase):
                            flag_path=base / "stop")
         self.flag = base / "stop"
         self.server = make_server(self.arena, "127.0.0.1", 0, proxy_header=self.proxy_header,
-                                  io_timeout=self.io_timeout, max_connections=self.max_connections)
+                                  io_timeout=self.io_timeout, max_connections=self.max_connections,
+                                  allowed_origins=self.allowed_origins, request_deadline=self.request_deadline,
+                                  per_client=self.per_client, exempt_loopback=self.exempt_loopback)
         self.port = self.server.server_address[1]
         thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         thread.start()
@@ -438,6 +444,199 @@ class LoadTests(ServerCase):
                 sock.close()
         time.sleep(1.0)  # the held connections time out and free their slots
         self.assertEqual(self.call("GET", "/api/stats")[0], 200)
+
+
+class DeadlineTests(ServerCase):
+    io_timeout = 2.0  # each read is allowed; the whole request is not
+    request_deadline = 1.5
+    max_connections = 3
+
+    def trickle(self, header: bytes):
+        sock = socket.create_connection(("127.0.0.1", self.port), timeout=10)
+        sock.sendall(header)
+        return sock
+
+    def test_a_client_that_sends_one_byte_at_a_time_is_dropped_at_the_deadline(self):
+        sock = self.trickle(b"POST /api/attempt HTTP/1.0\r\nContent-Type: application/json\r\nContent-Length: 500\r\n\r\n")
+        started, closed = time.time(), False
+        try:
+            while time.time() - started < 6:
+                try:
+                    sock.sendall(b"x")
+                except OSError:
+                    closed = True
+                    break
+                time.sleep(0.4)  # always inside the per-read timeout
+        finally:
+            sock.close()
+        self.assertTrue(closed, "the connection stayed open past the deadline")
+        self.assertLess(time.time() - started, 4)
+
+    def test_trickling_clients_do_not_keep_the_slots_and_the_next_visitor_is_served(self):
+        socks = [self.trickle(b"GET /api/stats HTTP/1.0\r\nX-Slow: ") for _ in range(3)]
+        try:
+            time.sleep(0.3)
+            extra = socket.create_connection(("127.0.0.1", self.port), timeout=5)
+            extra.sendall(b"GET /api/stats HTTP/1.0\r\n\r\n")
+            self.assertEqual(extra.recv(100), b"")  # all slots are taken
+            extra.close()
+            time.sleep(2.0)  # past the deadline
+            self.assertEqual(self.call("GET", "/api/stats")[0], 200)
+        finally:
+            for sock in socks:
+                sock.close()
+
+    def test_the_deadline_does_not_cut_a_slow_model_call(self):
+        original = self.source.__call__
+
+        class SlowBrain:
+            tokens_used = 10
+
+            def decide(inner, task):
+                time.sleep(2.5)  # longer than the deadline
+                return refuse("no")
+
+        self.source.brains.clear()
+        with mock.patch.object(self.arena, "brain_factory", lambda: SlowBrain()):
+            status, _, data = self.attempt()
+        self.assertEqual(status, 200)
+        self.assertEqual(data["status"], "done")
+
+
+class PerClientTests(ServerCase):
+    per_client = 2
+    exempt_loopback = False
+    io_timeout = 1.0
+
+    def test_one_client_cannot_hold_more_than_its_share_and_it_recovers(self):
+        held = [socket.create_connection(("127.0.0.1", self.port), timeout=5) for _ in range(2)]
+        try:
+            time.sleep(0.2)
+            extra = socket.create_connection(("127.0.0.1", self.port), timeout=5)
+            extra.sendall(b"GET /api/stats HTTP/1.0\r\n\r\n")
+            self.assertEqual(extra.recv(100), b"")
+            extra.close()
+        finally:
+            for sock in held:
+                sock.close()
+        time.sleep(1.5)
+        self.assertEqual(self.call("GET", "/api/stats")[0], 200)
+        self.assertEqual(self.server._open, {})
+
+
+class LoopbackExemptTests(ServerCase):
+    per_client = 1
+    io_timeout = 1.0
+
+    def test_the_proxy_on_this_machine_is_not_limited_per_client(self):
+        held = [socket.create_connection(("127.0.0.1", self.port), timeout=5) for _ in range(3)]
+        try:
+            time.sleep(0.2)
+            self.assertEqual(self.call("GET", "/api/stats")[0], 200)
+        finally:
+            for sock in held:
+                sock.close()
+
+
+class CrossOriginTests(ServerCase):
+    allowed_origins = ("https://arena.example.app",)
+    page = {"Origin": "https://arena.example.app"}
+
+    def test_the_listed_page_may_post_and_read_the_answer(self):
+        status, head, data = self.attempt(headers=self.page)
+        self.assertEqual((status, data["status"]), (200, "done"))
+        self.assertEqual(head["Access-Control-Allow-Origin"], "https://arena.example.app")
+        self.assertEqual(head["Vary"], "Origin")
+
+    def test_errors_and_gets_carry_the_header_for_the_listed_page_only(self):
+        _, head, _ = self.call("GET", "/api/stats", headers=self.page)
+        self.assertEqual(head["Access-Control-Allow-Origin"], "https://arena.example.app")
+        _, head, _ = self.call("GET", "/api/stats", headers={"Origin": "https://evil.example"})
+        self.assertNotIn("Access-Control-Allow-Origin", head)
+        status, head, _ = self.post({"tier": "loose"}, self.page)
+        self.assertEqual(status, 400)
+        self.assertIn("Access-Control-Allow-Origin", head)
+
+    def test_an_unlisted_origin_is_still_refused_and_gets_no_header(self):
+        for origin in ("https://evil.example", "https://arena.example.app.evil.example", "http://arena.example.app", "null"):
+            status, head, _ = self.post({"tier": "loose", "message": "hi"}, {"Origin": origin})
+            self.assertEqual(status, 403, origin)
+            self.assertNotIn("Access-Control-Allow-Origin", head)
+        self.assertEqual(self.source.brains, [])
+
+    def test_the_preflight_for_the_listed_page(self):
+        status, head, body = self.call("OPTIONS", "/api/attempt", headers={
+            **self.page, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type"})
+        self.assertEqual((status, body), (204, b""))
+        self.assertEqual(head["Access-Control-Allow-Origin"], "https://arena.example.app")
+        self.assertEqual(head["Access-Control-Allow-Methods"], "POST")
+        self.assertEqual(head["Access-Control-Allow-Headers"], "Content-Type")
+        self.assertEqual(self.source.brains, [])
+
+    def test_the_preflight_for_any_other_origin_or_path_is_refused(self):
+        self.assertEqual(self.call("OPTIONS", "/api/attempt", headers={"Origin": "https://evil.example"})[0], 405)
+        self.assertEqual(self.call("OPTIONS", "/api/attempt")[0], 405)
+        self.assertEqual(self.call("OPTIONS", "/arena.js", headers=self.page)[0], 405)
+
+    def test_cookies_are_never_allowed(self):
+        _, head, _ = self.call("GET", "/api/stats", headers=self.page)
+        self.assertNotIn("Access-Control-Allow-Credentials", head)
+
+    def test_the_list_accepts_only_plain_origins(self):
+        base = dict(arena=self.arena, host="127.0.0.1", port=0)
+        for bad in ("*", "https://x.example/", "https://x.example/path", "http://x.example", "ftp://x.example",
+                    "https://", "https://X.example", "https://x.example:99999999", "https://a b.example"):
+            with self.assertRaises(ValueError, msg=bad):
+                make_server(allowed_origins=(bad,), **base)
+        for good in ("https://x.example", "https://a-b.c.example:8443", "http://localhost:5173", "http://127.0.0.1:3000"):
+            make_server(allowed_origins=(good,), **base).server_close()
+
+
+class StdlibErrorTests(ServerCase):
+    def test_errors_the_library_raises_carry_the_headers_and_our_body(self):
+        for raw, code in ((b"FOO / HTTP/1.0\r\n\r\n", 501), (b"GET / HTTP/9.9\r\n\r\n", 505),
+                          (b"GET /" + b"a" * 70000 + b" HTTP/1.0\r\n\r\n", 414)):
+            reply = self.raw_request(raw)
+            head, _, body = reply.partition(b"\r\n\r\n")
+            self.assertIn(f" {code} ".encode(), head.split(b"\r\n")[0])
+            self.assertIn(b"Content-Security-Policy", head)
+            self.assertIn(b"nosniff", head)
+            self.assertEqual(json.loads(body)["status"], "error")
+
+    def test_a_garbage_first_line_gets_no_html_page(self):
+        reply = self.raw_request(b"\x00\x01 garbage\r\n\r\n")
+        self.assertNotIn(b"<html", reply.lower())
+        self.assertNotIn(b"<body", reply.lower())
+
+
+class FeedLimitTests(ServerCase):
+    def test_a_limit_over_the_maximum_or_zero_is_refused(self):
+        for value in (FEED_MAX + 1, 0, 5000):
+            self.assertEqual(self.call("GET", f"/api/feed?limit={value}")[0], 400, value)
+        self.assertEqual(self.call("GET", f"/api/feed?limit={FEED_MAX}")[0], 200)
+        self.assertEqual(self.call("GET", "/api/feed?limit=1")[0], 200)
+
+
+class BucketTests(unittest.TestCase):
+    def test_two_addresses_of_one_64_share_a_visitor_and_another_64_does_not(self):
+        a = visitor_key("2001:db8:1:2::1", SALT)
+        self.assertEqual(a, visitor_key("2001:db8:1:2:ffff:ffff:ffff:ffff", SALT))
+        self.assertNotEqual(a, visitor_key("2001:db8:1:3::1", SALT))
+
+    def test_ipv4_and_mapped_ipv4_and_odd_text(self):
+        self.assertEqual(client_bucket("203.0.113.9"), "203.0.113.9")
+        self.assertEqual(client_bucket("::ffff:203.0.113.9"), "203.0.113.9")
+        self.assertEqual(client_bucket("not-an-address"), "not-an-address")
+        self.assertNotEqual(visitor_key("203.0.113.9", SALT), visitor_key("203.0.113.10", SALT))
+
+    def test_one_64_cannot_make_a_second_visitor_by_changing_its_address(self):
+        limiter = Limiter(per_hour=2)
+        key = lambda addr: visitor_key(addr, SALT)
+        self.assertIsNone(limiter.admit(key("2001:db8::1")))
+        limiter.release(key("2001:db8::1"))
+        self.assertIsNone(limiter.admit(key("2001:db8::2")))
+        limiter.release(key("2001:db8::2"))
+        self.assertEqual(limiter.admit(key("2001:db8::3")), "visitor_hour")
 
 
 class HelperTests(unittest.TestCase):

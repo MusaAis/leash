@@ -96,6 +96,14 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("TX_ID.test(txId)", JS)
         self.assertIn('link.rel = "noopener noreferrer"', JS)
 
+    def test_the_api_address_comes_from_one_meta_tag_and_must_be_a_plain_https_origin(self):
+        self.assertIn(("meta", "name", "leash-api"), PAGE.attrs)
+        self.assertIn(("meta", "content", ""), PAGE.attrs)  # the repository copy means "same address"
+        self.assertIn("fetch(API_BASE + path, options)", JS)
+        self.assertIn('API_ORIGIN.test(value || "") ? value : ""', JS)
+        self.assertIn("https:\\/\\/", JS)
+        self.assertEqual(len(re.findall(r"fetch\(", JS)), 1)
+
     def test_the_request_sends_no_cookies(self):
         self.assertIn('options.credentials = "omit"', JS)
 

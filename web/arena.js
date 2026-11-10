@@ -47,13 +47,22 @@
     return link;
   }
 
+  // The page may be served from another address than the API. The address is read from one meta tag
+  // and must be a plain https origin; anything else means "the same address as the page".
+  var API_ORIGIN = /^https:\/\/[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$/;
+  var API_BASE = (function () {
+    var tag = document.querySelector("meta[name=\"leash-api\"]");
+    var value = tag ? tag.getAttribute("content") : "";
+    return API_ORIGIN.test(value || "") ? value : "";
+  }());
+
   function request(path, options, timeoutMs) {
     var controller = new AbortController();
     var timer = setTimeout(function () { controller.abort(); }, timeoutMs || 20000);
     options = options || {};
     options.signal = controller.signal;
     options.credentials = "omit";
-    return fetch(path, options).then(function (response) {
+    return fetch(API_BASE + path, options).then(function (response) {
       return response.json().then(function (data) {
         return { ok: response.ok, status: response.status, data: data };
       }, function () {

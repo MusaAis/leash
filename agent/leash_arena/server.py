@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import re
+import socket
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -11,9 +13,13 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 from .arena import Arena
+from .limits import client_bucket
 from .tiers import NETWORK
 
 MAX_BODY_BYTES = 2048
+REQUEST_DEADLINE_SECONDS = 15.0  # accept to last body byte; cancelled before the model call
+MAX_PER_CLIENT = 4  # open connections per client address (not applied to the proxy on this machine)
+ORIGIN_PATTERN = re.compile(r"^(https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?|http://(localhost|127\.0\.0\.1)(:[0-9]{1,5})?)$")
 FEED_DEFAULT, FEED_MAX = 20, 50
 DEFAULT_WEB_DIR = Path(__file__).resolve().parents[2] / "web"
 
@@ -93,21 +99,54 @@ class ArenaServer(ThreadingHTTPServer):
     request_queue_size = 32
 
     def __init__(self, address, handler, arena: Arena, assets: dict[str, tuple[bytes, str]],
-                 proxy_header: str | None, mode: str, max_connections: int) -> None:
+                 proxy_header: str | None, mode: str, max_connections: int,
+                 allowed_origins: frozenset[str] = frozenset(), per_client: int = MAX_PER_CLIENT,
+                 exempt_loopback: bool = True) -> None:
         super().__init__(address, handler)
         self.arena, self.assets, self.proxy_header, self.mode = arena, assets, proxy_header, mode
+        self.allowed_origins, self.per_client, self.exempt_loopback = allowed_origins, per_client, exempt_loopback
         self._connections = threading.BoundedSemaphore(max_connections)
+        self._open: dict[str, int] = {}
+        self._open_lock = threading.Lock()
+
+    def _client_key(self, peer: str) -> str | None:
+        """The bucket of a client address for the connection cap; None when the cap does not apply."""
+        if self.exempt_loopback:
+            try:
+                address = ipaddress.ip_address(peer)
+                address = getattr(address, "ipv4_mapped", None) or address
+                if address.is_loopback:
+                    return None
+            except ValueError:
+                pass
+        return client_bucket(peer)
 
     def process_request(self, request, client_address) -> None:
         if not self._connections.acquire(blocking=False):
             self.shutdown_request(request)  # too many open connections: drop this one
             return
+        key = self._client_key(client_address[0])
+        if key is not None:
+            with self._open_lock:
+                if self._open.get(key, 0) >= self.per_client:
+                    self._connections.release()
+                    self.shutdown_request(request)  # this client already holds its share
+                    return
+                self._open[key] = self._open.get(key, 0) + 1
         super().process_request(request, client_address)
 
     def process_request_thread(self, request, client_address) -> None:
         try:
             super().process_request_thread(request, client_address)
         finally:
+            key = self._client_key(client_address[0])
+            if key is not None:
+                with self._open_lock:
+                    left = self._open.get(key, 0) - 1
+                    if left > 0:
+                        self._open[key] = left
+                    else:
+                        self._open.pop(key, None)
             self._connections.release()
 
     def handle_error(self, request, client_address) -> None:
@@ -133,7 +172,8 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.0"  # one request per connection, so no connection stays open
     server_version = "LeashArena"
     sys_version = ""
-    timeout = 10
+    timeout = 10  # one socket read
+    request_deadline = REQUEST_DEADLINE_SECONDS  # the whole request, accept to last body byte
     server: ArenaServer
 
     def version_string(self) -> str:
@@ -141,6 +181,40 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, *args) -> None:
         """Requests are not logged: they carry network addresses."""
+
+    # -- one deadline for the whole request ----------------------------------------
+    def handle(self) -> None:
+        self._deadline = threading.Timer(self.request_deadline, self._expire)
+        self._deadline.daemon = True
+        self._deadline.start()
+        try:
+            super().handle()
+        finally:
+            self._deadline.cancel()
+
+    def _expire(self) -> None:
+        try:
+            self.request.shutdown(socket.SHUT_RDWR)  # wakes a blocked read; the request ends
+        except OSError:
+            pass
+
+    def send_error(self, code, message=None, explain=None) -> None:
+        """Errors the standard library raises itself carry the same body and headers as ours."""
+        self.close_connection = True
+        self.request_version = "HTTP/1.0"  # an early error has no version yet; answer with a status line anyway
+        names = {414: "uri_too_long", 431: "headers_too_large", 501: "not_implemented", 505: "version_not_supported"}
+        try:
+            self._error(code, names.get(code, "bad_request"))
+        except Exception:
+            pass
+
+    # -- cross-origin access (the page may be served from another address) --------------
+    def _cors_headers(self) -> dict:
+        origin = getattr(self, "headers", None) and self.headers.get("Origin")
+        if origin and origin in self.server.allowed_origins:
+            return {"Access-Control-Allow-Origin": origin, "Vary": "Origin",
+                    "Cross-Origin-Resource-Policy": "cross-origin"}
+        return {}
 
     # -- responses -----------------------------------------------------------------
     def _send(self, status: int, body: bytes, content_type: str, extra: dict | None = None) -> None:
@@ -154,7 +228,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _json(self, status: int, obj: object, extra: dict | None = None) -> None:
-        self._send(status, _json_bytes(obj), "application/json", extra)
+        self._send(status, _json_bytes(obj), "application/json", {**self._cors_headers(), **(extra or {})})
 
     def _error(self, status: int, code: str, extra: dict | None = None) -> None:
         self._json(status, {"status": "error", "error": code}, extra)
@@ -179,6 +253,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "bad_request")
         path, _, query = self.path.partition("?")  # no decoding: an encoded path never matches a route
         method = self.command
+        if method == "OPTIONS" and (path in API_GET or path in API_POST) and self._cors_headers():
+            allow = "GET, HEAD" if path in API_GET else "POST"
+            return self._send(204, b"", "text/plain", {
+                **self._cors_headers(), "Access-Control-Allow-Methods": allow,
+                "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Max-Age": "600"})
         if path in STATIC or path in API_GET:
             if method not in ("GET", "HEAD"):
                 return self._error(405, "method_not_allowed", {"Allow": "GET, HEAD"})
@@ -229,6 +308,8 @@ class Handler(BaseHTTPRequestHandler):
         if origin is None:
             return True
         scheme, sep, host = origin.partition("://")
+        if origin in self.server.allowed_origins:
+            return True
         return bool(sep) and scheme in ("http", "https") and host == self.headers.get("Host")
 
     def _post_attempt(self) -> None:
@@ -248,6 +329,7 @@ class Handler(BaseHTTPRequestHandler):
         if content_type != "application/json":
             return self._error(415, "unsupported_media_type")
         raw = self.rfile.read(length)
+        self._deadline.cancel()  # the visitor sent everything; the model call may take longer
         if len(raw) != length:
             return self._error(400, "bad_request")
         try:
@@ -264,9 +346,15 @@ class Handler(BaseHTTPRequestHandler):
 
 def make_server(arena: Arena, host: str = "127.0.0.1", port: int = 8080, web_dir: Path | None = None,
                 proxy_header: str | None = None, mode: str = "live", max_connections: int = 64,
-                io_timeout: float = 10.0) -> ArenaServer:
+                io_timeout: float = 10.0, allowed_origins: tuple[str, ...] = (),
+                request_deadline: float = REQUEST_DEADLINE_SECONDS, per_client: int = MAX_PER_CLIENT,
+                exempt_loopback: bool = True) -> ArenaServer:
     """Build the server. The page files are read once here; no other file is ever served."""
+    for origin in allowed_origins:
+        if not ORIGIN_PATTERN.match(origin):
+            raise ValueError("an allowed origin is https://host[:port] (http only for localhost), with no path")
     folder = Path(web_dir) if web_dir else DEFAULT_WEB_DIR
     assets = {path: ((folder / name).read_bytes(), ctype) for path, (name, ctype) in STATIC.items()}
-    handler = type("ArenaHandler", (Handler,), {"timeout": io_timeout})
-    return ArenaServer((host, port), handler, arena, assets, proxy_header, mode, max_connections)
+    handler = type("ArenaHandler", (Handler,), {"timeout": io_timeout, "request_deadline": request_deadline})
+    return ArenaServer((host, port), handler, arena, assets, proxy_header, mode, max_connections,
+                       frozenset(allowed_origins), per_client, exempt_loopback)
