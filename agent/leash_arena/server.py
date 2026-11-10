@@ -42,8 +42,13 @@ STATIC = {  # the only files that are ever served: URL path -> (file name, conte
     "/arena.css": ("arena.css", "text/css; charset=utf-8"),
     "/arena.js": ("arena.js", "text/javascript; charset=utf-8"),
 }
-API_GET = ("/api/stats", "/api/feed")
-API_POST = ("/api/attempt",)
+DASH_STATIC = {  # served only when the dashboard is switched on
+    "/dashboard": ("dash.html", "text/html; charset=utf-8"),
+    "/dash.css": ("dash.css", "text/css; charset=utf-8"),
+    "/dash.js": ("dash.js", "text/javascript; charset=utf-8"),
+}
+API_GET = ("/api/stats", "/api/feed", "/api/dashboard")
+API_POST = ("/api/attempt", "/api/panic")
 
 # reason -> (HTTP status, plain text for the visitor, seconds to wait before trying again or None)
 REJECTIONS = {
@@ -101,8 +106,9 @@ class ArenaServer(ThreadingHTTPServer):
     def __init__(self, address, handler, arena: Arena, assets: dict[str, tuple[bytes, str]],
                  proxy_header: str | None, mode: str, max_connections: int,
                  allowed_origins: frozenset[str] = frozenset(), per_client: int = MAX_PER_CLIENT,
-                 exempt_loopback: bool = True) -> None:
+                 exempt_loopback: bool = True, dashboard=None) -> None:
         super().__init__(address, handler)
+        self.dashboard = dashboard
         self.arena, self.assets, self.proxy_header, self.mode = arena, assets, proxy_header, mode
         self.allowed_origins, self.per_client, self.exempt_loopback = allowed_origins, per_client, exempt_loopback
         self._connections = threading.BoundedSemaphore(max_connections)
@@ -258,20 +264,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(204, b"", "text/plain", {
                 **self._cors_headers(), "Access-Control-Allow-Methods": allow,
                 "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Max-Age": "600"})
-        if path in STATIC or path in API_GET:
+        if path in self.server.assets or path in API_GET:
             if method not in ("GET", "HEAD"):
                 return self._error(405, "method_not_allowed", {"Allow": "GET, HEAD"})
-            if path in STATIC:
+            if path in self.server.assets:
                 body, content_type = self.server.assets[path]
                 return self._send(200, body, content_type)
             return self._get_api(path, query)
         if path in API_POST:
             if method != "POST":
                 return self._error(405, "method_not_allowed", {"Allow": "POST"})
-            return self._post_attempt()
+            return self._post_panic() if path == "/api/panic" else self._post_attempt()
         return self._error(404, "not_found")
 
     def _get_api(self, path: str, query: str) -> None:
+        if path == "/api/dashboard":
+            if self.server.dashboard is None:
+                return self._error(404, "not_found")
+            return self._json(200, self.server.dashboard.snapshot())
         if path == "/api/stats":
             return self._json(200, self.server.stats_payload())
         params = parse_qs(query, keep_blank_values=True, max_num_fields=4)
@@ -312,6 +322,20 @@ class Handler(BaseHTTPRequestHandler):
             return True
         return bool(sep) and scheme in ("http", "https") and host == self.headers.get("Host")
 
+    def _post_panic(self) -> None:
+        dash = self.server.dashboard
+        if dash is None or not dash.panic_enabled:
+            return self._error(404, "not_found")
+        origin = self.headers.get("Origin")  # only the dashboard page of this server may call it
+        if origin is not None and origin.partition("://")[2] != self.headers.get("Host"):
+            return self._error(403, "forbidden_origin")
+        if dash.locked():
+            return self._error(429, "locked", {"Retry-After": "60"})
+        auth = self.headers.get("Authorization", "")
+        if not (auth.startswith("Bearer ") and dash.token_ok(auth[7:].strip())):
+            return self._error(401, "unauthorized")
+        self._json(200, {"status": "done", **dash.panic()})
+
     def _post_attempt(self) -> None:
         if not self._origin_ok():
             return self._error(403, "forbidden_origin")
@@ -348,13 +372,14 @@ def make_server(arena: Arena, host: str = "127.0.0.1", port: int = 8080, web_dir
                 proxy_header: str | None = None, mode: str = "live", max_connections: int = 64,
                 io_timeout: float = 10.0, allowed_origins: tuple[str, ...] = (),
                 request_deadline: float = REQUEST_DEADLINE_SECONDS, per_client: int = MAX_PER_CLIENT,
-                exempt_loopback: bool = True) -> ArenaServer:
+                exempt_loopback: bool = True, dashboard=None) -> ArenaServer:
     """Build the server. The page files are read once here; no other file is ever served."""
     for origin in allowed_origins:
         if not ORIGIN_PATTERN.match(origin):
             raise ValueError("an allowed origin is https://host[:port] (http only for localhost), with no path")
     folder = Path(web_dir) if web_dir else DEFAULT_WEB_DIR
-    assets = {path: ((folder / name).read_bytes(), ctype) for path, (name, ctype) in STATIC.items()}
+    served = {**STATIC, **(DASH_STATIC if dashboard is not None else {})}
+    assets = {path: ((folder / name).read_bytes(), ctype) for path, (name, ctype) in served.items()}
     handler = type("ArenaHandler", (Handler,), {"timeout": io_timeout, "request_deadline": request_deadline})
     return ArenaServer((host, port), handler, arena, assets, proxy_header, mode, max_connections,
-                       frozenset(allowed_origins), per_client, exempt_loopback)
+                       frozenset(allowed_origins), per_client, exempt_loopback, dashboard)

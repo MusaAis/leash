@@ -45,6 +45,7 @@ class Settings:
     invoice_near: str
     origins: tuple[str, ...]
     proxy_header: str
+    panic_sha256: str = ""
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -61,9 +62,12 @@ class Settings:
         header = env.get("LEASH_ARENA_PROXY_HEADER", DEFAULT_PROXY_HEADER)
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,40}", header):
             raise LiveError("LEASH_ARENA_PROXY_HEADER is not a header name")
+        panic = env.get("LEASH_ARENA_PANIC_SHA256", "")
+        if panic and not re.fullmatch(r"[0-9a-f]{64}", panic):
+            raise LiveError("LEASH_ARENA_PANIC_SHA256 is not a SHA-256 in lower-case hex")
         return cls(Path(state), fortress, loose, env.get("LEASH_ARENA_CAP_USD", "4"),
                    env.get("LEASH_ARENA_PRICE_USD", "0.5"), env.get("LEASH_ARENA_INVOICE_NEAR", "0.01"),
-                   origins, header)
+                   origins, header, panic)
 
 
 def tier_config(base: Config, prefix: str) -> Config:

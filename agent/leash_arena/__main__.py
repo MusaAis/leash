@@ -11,7 +11,8 @@ from pathlib import Path
 from leash_agent.config import Config, EnvFileError, load_env_file
 
 from .demo import demo_arena
-from .live import LiveError, Settings, build_live_arena
+from .dash import Dashboard
+from .live import LiveError, Settings, build_live_arena, tier_config
 from .server import make_server
 
 
@@ -19,15 +20,19 @@ def _live(args) -> int:
     try:
         load_env_file(Path(os.environ.get("LEASH_ARENA_ENV") or Path.home() / ".leash" / "arena.env"))
         settings = Settings.from_env()
-        arena = build_live_arena(settings, Config.from_env())
-        server = make_server(arena, "127.0.0.1", 0 if args.check else args.port, proxy_header=settings.proxy_header, mode="live",
-                             allowed_origins=settings.origins)
+        base = Config.from_env()
+        arena = build_live_arena(settings, base)
+        configs = {"fortress": tier_config(base, settings.fortress_prefix), "loose": tier_config(base, settings.loose_prefix)}
+        dash = Dashboard(configs, settings.state_dir / "stop", settings.panic_sha256 or None)
+        server = make_server(arena, "127.0.0.1", 0 if args.check else args.port, proxy_header=settings.proxy_header,
+                             mode="live", allowed_origins=settings.origins, dashboard=dash)
     except (LiveError, EnvFileError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     tiers = ", ".join(f"{name}={tier.vault}" for name, tier in arena.tiers.items())
     print(f"arena: {tiers}; network testnet; model budget cap {settings.cap_usd} USD; "
-          f"stop file {'present' if arena._flag_set() else 'absent'}; origins {len(settings.origins)}")
+          f"stop file {'present' if arena._flag_set() else 'absent'}; origins {len(settings.origins)}; "
+          f"panic switch {'on' if dash.panic_enabled else 'off'}")
     if args.check:
         server.server_close()
         return 0

@@ -3,7 +3,7 @@ import unittest
 from html.parser import HTMLParser
 from pathlib import Path
 
-from leash_arena.server import DEFAULT_WEB_DIR, SECURITY_HEADERS, STATIC
+from leash_arena.server import DEFAULT_WEB_DIR, DASH_STATIC, SECURITY_HEADERS, STATIC
 
 WEB = DEFAULT_WEB_DIR
 HTML = (WEB / "index.html").read_text()
@@ -30,7 +30,7 @@ PAGE.feed(HTML)
 
 class PageTests(unittest.TestCase):
     def test_the_server_serves_exactly_the_page_files(self):
-        self.assertEqual({name for name, _ in STATIC.values()}, {p.name for p in WEB.iterdir()})
+        self.assertEqual({name for name, _ in {**STATIC, **DASH_STATIC}.values()}, {p.name for p in WEB.iterdir()})
 
     def test_the_page_has_no_inline_script_style_or_event_handler(self):
         self.assertEqual(PAGE.tags.count("script"), 1)
