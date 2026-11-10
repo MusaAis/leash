@@ -243,7 +243,7 @@ class VaultHasCode(unittest.TestCase):
     SHA = "18f112959fc2a6ec4a83489803589c83872c43564e96cd94ac70df1f1113dff0"
     B58 = "2gMzTHTr2TwtwAaHsXZbKH9nBLi2ZfU9HLMVHG82B8KZ"
 
-    def run_script(self, answers, tries="3"):
+    def run_script(self, answers, tries="3", sha=None):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         bin_dir = Path(tmp.name) / "bin"
@@ -264,7 +264,7 @@ class VaultHasCode(unittest.TestCase):
         env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", LEASH_CODE_WAIT="0")
         env.pop("NETWORK", None)
         return subprocess.run(
-            ["bash", "scripts/vault-has-code.sh", "v.testnet", self.SHA, tries],
+            ["bash", "scripts/vault-has-code.sh", "v.testnet", sha or self.SHA, tries],
             cwd=ROOT, env=env, capture_output=True, text=True,
         )
 
@@ -275,6 +275,17 @@ class VaultHasCode(unittest.TestCase):
     def test_base58_hash_matches(self):
         out = self.run_script([f"Contract hash: {self.B58}\n"])
         self.assertEqual(out.returncode, 0, out.stderr)
+
+    ZERO_SHA = "0018f112959fc2a6ec4a83489803589c83872c43564e96cd94ac70df1f1113df"
+    ZERO_B58 = "1P4PzAAi1nXZcP7Bcv9HqYkgEfuLqdovzApgwSBCbU2"
+
+    def test_a_hash_with_a_leading_zero_byte_matches_in_base58(self):
+        out = self.run_script([f"Contract hash: {self.ZERO_B58}\n"], sha=self.ZERO_SHA)
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_the_base58_form_is_matched_case_sensitively(self):
+        out = self.run_script([f"Contract hash: {self.B58.lower()}\n"], tries="2")
+        self.assertEqual(out.returncode, 1)
 
     def test_a_lagging_read_is_retried(self):
         out = self.run_script(["Contract: none\n", f"Contract hash: {self.SHA}\n"])
