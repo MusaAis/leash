@@ -401,6 +401,7 @@ class ArenaScriptTests(unittest.TestCase):
             tunnel = (Path(d) / "leash-arena-tunnel.service").read_text()
         self.assertIn("-m leash_arena --live", arena)
         self.assertIn("EnvironmentFile=", arena)
+        self.assertIn(f"Environment=PATH={tmp.name}/bin:", arena)
         self.assertIn("MemoryMax=", arena)
         self.assertIn("--url http://127.0.0.1:8081", tunnel)
         self.assertIn("--config /dev/null", tunnel)

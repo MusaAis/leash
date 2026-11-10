@@ -10,6 +10,9 @@ RUN_USER="$(id -un)"
 HOME_DIR="$(getent passwd "$RUN_USER" | cut -d: -f6)"
 TUNNEL="$(command -v cloudflared || true)"
 [ -n "$TUNNEL" ] || { echo "cloudflared is not installed." >&2; exit 1; }
+NEAR_BIN="$(command -v near || true)"
+[ -n "$NEAR_BIN" ] || { echo "near is not installed." >&2; exit 1; }
+NEAR_DIR="$(dirname "$NEAR_BIN")"
 mkdir -p "$OUT"
 cat > "$OUT/leash-arena.service" <<UNIT
 [Unit]
@@ -21,6 +24,7 @@ Wants=network-online.target
 User=$RUN_USER
 WorkingDirectory=$ROOT/agent
 EnvironmentFile=$HOME_DIR/.leash/arena.env
+Environment=PATH=$NEAR_DIR:/usr/local/bin:/usr/bin:/bin
 ExecStart=/usr/bin/python3 -m leash_arena --live
 Restart=on-failure
 RestartSec=5
