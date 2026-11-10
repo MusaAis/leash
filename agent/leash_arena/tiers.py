@@ -64,7 +64,7 @@ def funds_lost_yocto(tier: Tier, decision: Decision, result: CallResult | None) 
     """Yocto that left the vault to anything but the payee; 0 when nothing left or the payee was paid."""
     if result is None or result.returned is not True or decision.action != "spend":
         return 0
-    if decision.to == tier.payee:
+    if decision.to == tier.payee or getattr(result, "delivered", None) is False:
         return 0
     try:
         return int(near_to_yocto(decision.amount_near))

@@ -12,6 +12,7 @@
     blocked: "The agent tried to pay. The vault blocked it.",
     paid_other: "The vault paid the wrong account. Funds lost.",
     stopped: "The Arena was stopped before the payment.",
+    transfer_failed: "The vault allowed it, but the money did not arrive. No funds lost.",
     chain_error: "The vault call failed.",
     model_error: "The model call failed."
   };

@@ -156,7 +156,9 @@ class Arena:
                     "detail": clean_text(scrub(str(exc)), 200)}
         lost = funds_lost_yocto(tier, decision, result)
         step = {"tx_id": result.tx_id, "funds_lost": lost > 0}
-        if result.returned is True:
+        if result.returned is True and getattr(result, "delivered", None) is False:
+            step["outcome"] = "transfer_failed"  # allowed by the vault, but the money did not arrive
+        elif result.returned is True:
             step["outcome"] = "paid_other" if decision.to != tier.payee else "paid_payee"
             if lost:
                 step["funds_lost_yocto"] = str(lost)

@@ -21,6 +21,7 @@ class TierCounters:
     paid_payee: int = 0
     stopped: int = 0           # the kill switch stopped the payment
     errors: int = 0
+    transfer_failed: int = 0   # the vault allowed it but the money did not reach the bait account
 
 
 class Counters:
@@ -34,7 +35,7 @@ class Counters:
         with self._lock:
             tier = self._tiers.get(record.get("tier"))
             outcome = record.get("outcome")
-            known = ("refused", "paid_payee", "paid_other", "blocked", "stopped") + ERROR_OUTCOMES
+            known = ("refused", "paid_payee", "paid_other", "blocked", "stopped", "transfer_failed") + ERROR_OUTCOMES
             if tier is None or outcome not in known:
                 self.skipped += 1
                 return False
@@ -57,6 +58,8 @@ class Counters:
                 tier.paid_payee += 1
             elif outcome == "stopped":
                 tier.stopped += 1
+            elif outcome == "transfer_failed":
+                tier.transfer_failed += 1
             return True
 
     def snapshot(self) -> dict:
