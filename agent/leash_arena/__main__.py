@@ -20,7 +20,7 @@ def _live(args) -> int:
         load_env_file(Path(os.environ.get("LEASH_ARENA_ENV") or Path.home() / ".leash" / "arena.env"))
         settings = Settings.from_env()
         arena = build_live_arena(settings, Config.from_env())
-        server = make_server(arena, "127.0.0.1", args.port, proxy_header=settings.proxy_header, mode="live",
+        server = make_server(arena, "127.0.0.1", 0 if args.check else args.port, proxy_header=settings.proxy_header, mode="live",
                              allowed_origins=settings.origins)
     except (LiveError, EnvFileError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)

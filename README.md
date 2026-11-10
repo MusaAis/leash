@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
   <img src="https://img.shields.io/badge/network-NEAR%20mainnet%20and%20testnet-informational" alt="Network">
   <img src="https://img.shields.io/badge/contract%20tests-148%20passed-brightgreen" alt="Contract tests">
-  <img src="https://img.shields.io/badge/agent%20tests-670%20passed-brightgreen" alt="Agent tests">
+  <img src="https://img.shields.io/badge/agent%20tests-671%20passed-brightgreen" alt="Agent tests">
   <img src="https://img.shields.io/badge/Rust-1.96.0-orange" alt="Rust">
   <img src="https://img.shields.io/badge/near--sdk-%3D5.28.3-blue" alt="near-sdk">
 </p>
@@ -80,7 +80,7 @@ make test-agent   # agent tests
 make check        # format check, lint, contract and agent tests
 ```
 
-Expected: `make test` ends with `test result: ok. 148 passed`, and `make test-agent` prints `Ran 670 tests` followed by `OK`.
+Expected: `make test` ends with `test result: ok. 148 passed`, and `make test-agent` prints `Ran 671 tests` followed by `OK`.
 
 ### Testnet demo (optional, needs network)
 

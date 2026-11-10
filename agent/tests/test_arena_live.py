@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import socket
 import stat
 import subprocess
 import tempfile
@@ -286,6 +287,14 @@ class MainTests(unittest.TestCase):
             except SystemExit as exc:
                 code = exc.code
         return code, out.getvalue(), err.getvalue()
+
+    def test_check_does_not_use_the_service_port(self):
+        with tempfile.TemporaryDirectory() as d, socket.socket() as busy:
+            busy.bind(("127.0.0.1", 0))
+            busy.listen(1)
+            code, out, err = self.run_main(["--live", "--check", "--port", str(busy.getsockname()[1])],
+                                           {"LEASH_ARENA_DIR": d + "/s"})
+        self.assertEqual(code, 0, err)
 
     def test_check_builds_and_prints_without_the_key(self):
         with tempfile.TemporaryDirectory() as d:
