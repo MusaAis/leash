@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
   <img src="https://img.shields.io/badge/network-NEAR%20mainnet%20and%20testnet-informational" alt="Network">
   <img src="https://img.shields.io/badge/contract%20tests-148%20passed-brightgreen" alt="Contract tests">
-  <img src="https://img.shields.io/badge/agent%20tests-436%20passed-brightgreen" alt="Agent tests">
+  <img src="https://img.shields.io/badge/agent%20tests-728%20passed-brightgreen" alt="Agent tests">
   <img src="https://img.shields.io/badge/Rust-1.96.0-orange" alt="Rust">
   <img src="https://img.shields.io/badge/near--sdk-%3D5.28.3-blue" alt="near-sdk">
 </p>
@@ -80,7 +80,7 @@ make test-agent   # agent tests
 make check        # format check, lint, contract and agent tests
 ```
 
-Expected: `make test` ends with `test result: ok. 148 passed`, and `make test-agent` prints `Ran 436 tests` followed by `OK`.
+Expected: `make test` ends with `test result: ok. 148 passed`, and `make test-agent` prints `Ran 728 tests` followed by `OK`.
 
 ### Testnet demo (optional, needs network)
 
@@ -189,12 +189,14 @@ Makefile             short entry points for every command above
 | 1Click dry quotes with a guardian check | Implemented, live dry quotes recorded in [docs/intents.md](docs/intents.md) |
 | Hash-chained decision log, `would_spend` views, pause-only key | Implemented, see [proof](docs/testnet-proof.md) |
 | Cross-chain payment through the vault | Done once on mainnet; 1Click returned status SUCCESS and 0.37853 USDC delivered on Base |
-| Arena, SDK | Planned |
+| Arena: public page, two tiers, pause-only bot | Implemented, see [docs/arena.md](docs/arena.md) |
+| SDK | Planned |
 
 ## Documentation
 
 - [Architecture](docs/architecture.md)
 - [Agent runtime](docs/agent.md)
+- [Arena](docs/arena.md)
 - [Deployment guide](docs/deployment.md)
 - [Security model](docs/security.md)
 - [NEAR Intents quotes](docs/intents.md)

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>LEASH dashboard</title>
+<link rel="stylesheet" href="/dash.css">
+</head>
+<body>
+<main>
+  <h1>Vault dashboard</h1>
+  <p id="status" role="status">Loading…</p>
+  <section id="tiers" aria-label="Vaults"></section>
+  <section id="panic" hidden aria-label="Panic switch">
+    <h2>Panic switch</h2>
+    <p>Stops new attempts and pauses both vaults. Resume stays with the owner key.</p>
+    <label for="token">Token</label>
+    <input id="token" type="password" autocomplete="off" spellcheck="false">
+    <button id="pause" type="button">Pause both vaults</button>
+    <p id="panic-result" role="status"></p>
+  </section>
+</main>
+<script src="/dash.js"></script>
+</body>
+</html>
