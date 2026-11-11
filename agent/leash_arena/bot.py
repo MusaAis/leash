@@ -81,8 +81,9 @@ def key_problem(path: str, owner: str, vault: str, fetch: Callable[[str, str], o
     if mode & 0o077:
         return "the key file must be mode 0600"
     public = data.get("public_key") if isinstance(data, dict) else None
-    if not (isinstance(data, dict) and data.get("account_id") == owner and isinstance(public, str)
-            and isinstance(data.get("private_key"), str)):
+    if not (isinstance(data, dict) and isinstance(public, str) and isinstance(data.get("private_key"), str)):
+        return "the key file is missing or is not a key file"
+    if "account_id" in data and data["account_id"] != owner:  # the CLI's folder files carry no account name
         return f"the key file is not for {owner}"
     if not online:
         return None

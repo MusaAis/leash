@@ -91,11 +91,14 @@ class SettingsTests(unittest.TestCase):
 
 
 class KeyTests(unittest.TestCase):
-    def keyfile(self, account="arenaf-owner.testnet", mode=0o600, public="ed25519:PUB"):
+    def keyfile(self, account="arenaf-owner.testnet", mode=0o600, public="ed25519:PUB", extra=None):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         path = Path(tmp.name) / "k.json"
-        path.write_text(json.dumps({"account_id": account, "public_key": public, "private_key": "ed25519:SECRET"}))
+        data = {"public_key": public, "private_key": "ed25519:SECRET", **(extra or {})}
+        if account is not None:
+            data["account_id"] = account
+        path.write_text(json.dumps(data))
         os.chmod(path, mode)
         return str(path)
 
@@ -122,6 +125,21 @@ class KeyTests(unittest.TestCase):
         self.assertIn("not for", self.check(self.keyfile(account="other.testnet"), self.keys()))
         self.assertIn("no key file", self.check("", self.keys()))
         self.assertIn("missing", self.check("/nonexistent/k.json", self.keys()))
+
+    def test_the_cli_folder_format_without_an_account_name_passes_when_the_chain_agrees(self):
+        folder_file = self.keyfile(account=None, extra={"master_seed_phrase": "x y z", "seed_phrase_hd_path": "m/44'/397'/0'",
+                                                        "implicit_account_id": "ab" * 32})
+        self.assertIsNone(self.check(folder_file, self.keys()))
+        self.assertIn("function-call", self.check(folder_file, self.keys(full=True)))  # the chain read still decides
+
+    def test_a_file_without_both_keys_is_refused(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        for data in ({"public_key": "ed25519:PUB"}, {"private_key": "x"}, {"public_key": 5, "private_key": "x"}, []):
+            path = Path(tmp.name) / "k.json"
+            path.write_text(json.dumps(data))
+            os.chmod(path, 0o600)
+            self.assertIn("not a key file", self.check(str(path), self.keys()), data)
 
     def test_an_unlisted_key_or_a_failed_read_is_refused(self):
         self.assertIn("function-call", self.check(self.keyfile(public="ed25519:OTHER"), self.keys()))
