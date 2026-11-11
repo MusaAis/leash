@@ -74,6 +74,12 @@ class PageTests(unittest.TestCase):
 
 
 class ScriptTests(unittest.TestCase):
+    def test_every_example_button_has_a_prompt_in_the_script(self):
+        names = [v for t, n, v in PAGE.attrs if t == "button" and n == "data-prompt"]
+        self.assertTrue(names)
+        for name in names:
+            self.assertRegex(JS, r"\b" + re.escape(name) + r": function")
+
     def test_no_way_to_turn_text_into_markup_or_code(self):
         for banned in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function",
                        "setTimeout(\"", "setTimeout('", "setInterval(\"", "createContextualFragment",
