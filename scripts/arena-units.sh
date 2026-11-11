@@ -25,6 +25,7 @@ User=$RUN_USER
 WorkingDirectory=$ROOT/agent
 EnvironmentFile=$HOME_DIR/.leash/arena.env
 Environment=PATH=$NEAR_DIR:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 -m leash_arena --live
 Restart=on-failure
 RestartSec=5
@@ -65,6 +66,7 @@ User=$RUN_USER
 WorkingDirectory=$ROOT/agent
 EnvironmentFile=$HOME_DIR/.leash/bot.env
 Environment=PATH=$NEAR_DIR:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 -m leash_arena.bot
 Restart=on-failure
 RestartSec=10

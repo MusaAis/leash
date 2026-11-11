@@ -189,12 +189,14 @@ Makefile             short entry points for every command above
 | 1Click dry quotes with a guardian check | Implemented, live dry quotes recorded in [docs/intents.md](docs/intents.md) |
 | Hash-chained decision log, `would_spend` views, pause-only key | Implemented, see [proof](docs/testnet-proof.md) |
 | Cross-chain payment through the vault | Done once on mainnet; 1Click returned status SUCCESS and 0.37853 USDC delivered on Base |
-| Arena, SDK | Planned |
+| Arena: public page, two tiers, pause-only bot | Implemented, see [docs/arena.md](docs/arena.md) |
+| SDK | Planned |
 
 ## Documentation
 
 - [Architecture](docs/architecture.md)
 - [Agent runtime](docs/agent.md)
+- [Arena](docs/arena.md)
 - [Deployment guide](docs/deployment.md)
 - [Security model](docs/security.md)
 - [NEAR Intents quotes](docs/intents.md)

@@ -413,6 +413,8 @@ class ArenaScriptTests(unittest.TestCase):
         self.assertIn("EnvironmentFile=", arena)
         self.assertIn(f"Environment=PATH={tmp.name}/bin:", arena)
         self.assertIn("MemoryMax=", arena)
+        self.assertIn("Environment=PYTHONUNBUFFERED=1", arena)
+        self.assertIn("Environment=PYTHONUNBUFFERED=1", pause_bot)
         self.assertIn("--url http://127.0.0.1:8081", tunnel)
         self.assertIn("--config /dev/null", tunnel)
         self.assertIn("-m leash_arena.bot", pause_bot)

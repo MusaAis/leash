@@ -4,6 +4,7 @@
 |---|---|
 | [Architecture](architecture.md) | Components, roles and data flow |
 | [Agent runtime](agent.md) | The agent, the model, injection handling and cost limits |
+| [Arena](arena.md) | The public injection test: tiers, definitions, limits and the stop switches |
 | [Deployment guide](deployment.md) | Creating a vault on testnet or mainnet |
 | [Security model](security.md) | Assets, adversaries, guarantees, current mainnet state, scope and limits |
 | [NEAR Intents quotes](intents.md) | The guardian, the call path through the vault and recorded results |
