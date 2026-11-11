@@ -408,13 +408,19 @@ class ArenaScriptTests(unittest.TestCase):
             self.assertEqual(out.returncode, 0, out.stderr)
             arena = (Path(d) / "leash-arena.service").read_text()
             tunnel = (Path(d) / "leash-arena-tunnel.service").read_text()
+            pause_bot = (Path(d) / "leash-arena-bot.service").read_text()
         self.assertIn("-m leash_arena --live", arena)
         self.assertIn("EnvironmentFile=", arena)
         self.assertIn(f"Environment=PATH={tmp.name}/bin:", arena)
         self.assertIn("MemoryMax=", arena)
         self.assertIn("--url http://127.0.0.1:8081", tunnel)
         self.assertIn("--config /dev/null", tunnel)
-        for text in (arena, tunnel):
+        self.assertIn("-m leash_arena.bot", pause_bot)
+        self.assertIn("EnvironmentFile=", pause_bot)
+        self.assertIn("bot.env", pause_bot)
+        self.assertNotIn("arena.env", pause_bot)
+        self.assertNotIn("bot.env", arena)
+        for text in (arena, tunnel, pause_bot):
             self.assertNotIn("0.0.0.0", text)
             self.assertNotIn("KEY=", text)
 

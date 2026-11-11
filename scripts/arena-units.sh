@@ -54,4 +54,26 @@ MemoryMax=150M
 [Install]
 WantedBy=multi-user.target
 UNIT
-echo "wrote $OUT/leash-arena.service and $OUT/leash-arena-tunnel.service"
+cat > "$OUT/leash-arena-bot.service" <<UNIT
+[Unit]
+Description=LEASH Arena pause bot (testnet)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=$RUN_USER
+WorkingDirectory=$ROOT/agent
+EnvironmentFile=$HOME_DIR/.leash/bot.env
+Environment=PATH=$NEAR_DIR:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 -m leash_arena.bot
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+MemoryMax=100M
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+echo "wrote $OUT/leash-arena.service, $OUT/leash-arena-tunnel.service and $OUT/leash-arena-bot.service"
