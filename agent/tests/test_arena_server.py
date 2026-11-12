@@ -1,5 +1,6 @@
 import http.client
 import json
+from email.message import Message
 import os
 import socket
 import tempfile
@@ -397,7 +398,11 @@ class StubHandler:
 
     def __init__(self, peer, headers, header="X-Forwarded-For"):
         self.client_address = (peer, 5000)
-        self.headers = headers
+        if isinstance(headers, dict):
+            headers = list(headers.items())
+        self.headers = Message()
+        for name, value in headers:
+            self.headers[name] = value  # a repeated name is kept as another line
         self.server = StubServer(header)
 
     def ip(self):
@@ -417,6 +422,95 @@ class PeerTests(unittest.TestCase):
 
     def test_an_ipv6_visitor_is_read_from_the_header(self):
         self.assertEqual(StubHandler("::1", {"X-Forwarded-For": "2001:db8::7"}).ip(), "2001:db8::7")
+
+
+class HeaderParsingTests(unittest.TestCase):
+    def test_the_last_header_line_and_the_last_entry_win(self):
+        both = [("X-Forwarded-For", "9.9.9.9"), ("X-Forwarded-For", "8.8.8.8, 1.1.1.1")]
+        self.assertEqual(StubHandler("127.0.0.1", both).ip(), "1.1.1.1")
+
+    def test_a_port_or_brackets_are_removed(self):
+        for text, want in (("1.1.1.1:443", "1.1.1.1"), ("[2001:db8::7]:443", "2001:db8::7"),
+                           ("[2001:db8::7]", "2001:db8::7"), (" 2001:db8::7 ", "2001:db8::7")):
+            self.assertEqual(StubHandler("::1", {"X-Forwarded-For": text}).ip(), want, text)
+
+    def test_junk_falls_back_to_the_peer(self):
+        for text in ("[2001:db8::7", "1.1.1.1:2:3x", "", "a.b.c.d"):
+            self.assertEqual(StubHandler("127.0.0.1", {"X-Forwarded-For": text}).ip(), "127.0.0.1", text)
+
+
+class ProxyClientCapTests(ServerCase):
+    proxy_header = "X-Forwarded-For"
+    per_client = 2
+
+    def hold(self, ip):
+        sock = socket.create_connection(("127.0.0.1", self.port), timeout=5)
+        sock.sendall(f"POST /api/attempt HTTP/1.0\r\nX-Forwarded-For: {ip}\r\nContent-Type: application/json\r\n"
+                     "Content-Length: 40\r\n\r\n{".encode())  # the body never finishes
+        return sock
+
+    def test_a_trickler_behind_the_proxy_is_capped_but_others_are_not(self):
+        held = [self.hold("203.0.113.9") for _ in range(2)]
+        try:
+            time.sleep(0.3)
+            third = self.hold("203.0.113.9")
+            self.assertTrue(third.recv(300).startswith(b"HTTP/1.0 429"))
+            third.close()
+            other = self.hold("203.0.113.10")  # another visitor is still served
+            other.settimeout(0.3)
+            with self.assertRaises(socket.timeout):
+                other.recv(10)
+            other.close()
+        finally:
+            for sock in held:
+                sock.close()
+        deadline = time.time() + 3
+        while time.time() < deadline and self.server._open:
+            time.sleep(0.05)
+        self.assertEqual(self.server._open, {})  # every claim was released
+
+
+class BodyDeadlineTests(ServerCase):
+    request_deadline = 0.5
+
+    def test_a_slow_body_is_cut_after_its_own_deadline(self):
+        with socket.create_connection(("127.0.0.1", self.port), timeout=5) as sock:
+            sock.sendall(b"POST /api/attempt HTTP/1.0\r\nContent-Type: application/json\r\nContent-Length: 40\r\n\r\n{")
+            started = time.time()
+            data = sock.recv(300)
+            self.assertLess(time.time() - started, 3)
+            self.assertTrue(data == b"" or b"400" in data)
+
+    def test_the_body_has_its_own_clock_after_the_headers(self):
+        self.stop()
+        self.server = make_server(self.arena, "127.0.0.1", 0, request_deadline=30.0, body_deadline=0.4)
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
+        with socket.create_connection(("127.0.0.1", self.port), timeout=5) as sock:
+            sock.sendall(b"POST /api/attempt HTTP/1.0\r\nContent-Type: application/json\r\nContent-Length: 40\r\n\r\n{")
+            started = time.time()
+            sock.recv(300)
+            self.assertLess(time.time() - started, 3)
+
+    def test_the_default_deadlines_are_five_seconds(self):
+        from leash_arena.server import BODY_DEADLINE_SECONDS, REQUEST_DEADLINE_SECONDS
+        self.assertEqual((REQUEST_DEADLINE_SECONDS, BODY_DEADLINE_SECONDS), (5.0, 5.0))
+
+
+class PostReserveTests(ServerCase):
+    max_connections = 4
+
+    def test_post_slots_leave_room_for_reads(self):
+        self.assertEqual(self.server._posts._value, 2)  # four connections, two kept for GET
+        held = [self.server._posts.acquire(blocking=False) for _ in range(2)]
+        try:
+            status, _, body = self.attempt("hello")
+            self.assertEqual((status, body["error"]), (429, "busy"))
+            self.assertEqual(self.call("GET", "/api/stats")[0], 200)
+        finally:
+            for ok in held:
+                if ok:
+                    self.server._posts.release()
 
 
 class LoadTests(ServerCase):

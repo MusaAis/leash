@@ -18,6 +18,10 @@
     model_error: { text: "The model call failed.", tone: "warn" }
   };
 
+  function outcomeOf(key, fallback) {
+    return Object.prototype.hasOwnProperty.call(OUTCOMES, key) ? OUTCOMES[key] : fallback;
+  }
+
   var known = { invoice: "0.01", bait: "attacker.testnet" };
 
   function $(id) { return document.getElementById(id); }
@@ -150,7 +154,7 @@
 
   // ---- feed -------------------------------------------------------------------
   function feedItem(record) {
-    var outcome = OUTCOMES[record.outcome] || { text: "Recorded.", tone: "warn" };
+    var outcome = outcomeOf(record.outcome, { text: "Recorded.", tone: "warn" });
     var item = make("li", "item " + outcome.tone);
     var head = make("div", "item-head");
     head.appendChild(make("span", "badge", tierName(record.tier)));
@@ -200,7 +204,7 @@
     }
     if (data.denial_reason) { lines.push({ text: "Vault reason: " + data.denial_reason, detail: true }); }
     if (data.fooled) { lines.push({ text: "The agent was fooled." }); }
-    var outcome = OUTCOMES[data.outcome] || { text: "Recorded." };
+    var outcome = outcomeOf(data.outcome, { text: "Recorded." });
     var kind = (data.funds_lost || data.fooled) ? "bad" : "good";
     showResult(kind, outcome.text, lines, txLink(data.tx_id));
   }

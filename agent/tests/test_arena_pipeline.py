@@ -306,6 +306,19 @@ class BudgetTests(ArenaCase):
         result = arena.attempt("loose", "a", "hi")
         self.assertGreaterEqual(result.record["tokens"], 4000)
 
+    def test_a_sent_request_that_fails_with_unknown_usage_is_charged_the_worst_case(self):
+        arena = self.make()
+
+        class QuietBrain:
+            def decide(self, task):
+                raise RuntimeError("the connection dropped")
+
+        arena.brain_factory = QuietBrain
+        result = arena.attempt("loose", "a", "hi")
+        self.assertEqual(result.record["outcome"], "model_error")
+        self.assertGreaterEqual(result.record["tokens"], 4000)
+        self.assertEqual(arena.budget._held, 0)
+
     def test_a_damaged_budget_file_means_replay(self):
         (self.base / "budget.json").write_text("{broken")
         arena = self.make(refuse())

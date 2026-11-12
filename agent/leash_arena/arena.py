@@ -127,7 +127,7 @@ class Arena:
             used = getattr(brain, "tokens_used", None)
             if isinstance(used, int) and not isinstance(used, bool) and used >= 0:
                 tokens = used
-            elif decision is not None:
+            elif brain is not None:  # a request may have been sent and its usage is unknown: the held worst case
                 tokens = worst
         finally:
             self._slots.release()

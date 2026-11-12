@@ -69,7 +69,7 @@ class BotSettings:
 
 
 def key_problem(path: str, owner: str, vault: str, fetch: Callable[[str, str], object] = fetch_keys,
-                online: bool = True) -> str | None:
+                online: bool = True, info: dict | None = None) -> str | None:
     """None when the file is this owner's key, readable only by its user, and (online) a pause-only key on the vault."""
     if not path:
         return "no key file path is set"
@@ -95,6 +95,16 @@ def key_problem(path: str, owner: str, vault: str, fetch: Callable[[str, str], o
         return "this key is not a function-call key on the owner account"
     if call.get("receiver_id") != vault or sorted(call.get("method_names") or []) != sorted(PANIC_METHODS):
         return f"this key can do more than {', '.join(PANIC_METHODS)} on {vault}"
+    allowance = call.get("allowance")
+    if allowance is not None:
+        try:
+            left = int(allowance)
+        except (TypeError, ValueError):
+            return "the key's gas allowance cannot be read"
+        if info is not None:
+            info["allowance_near"] = f"{left // 10**24}.{left % 10**24 // 10**20:04d}"
+        if left <= 0:
+            return "the key's gas allowance is used up"
     return None
 
 
@@ -193,12 +203,22 @@ class PauseBot:
             self._done.popleft()
         if len(self._done) >= MAX_PAUSES_PER_HOUR:
             return self.client.answer(callback_id, "Too many pauses this hour.")
-        self._done.append(now)
-        self.client.answer(callback_id, "Pausing.")
-        result = self.pause()
+        try:
+            result = self.pause()  # the work first: a slow or failing acknowledgement must not hold it back
+        except Exception:
+            result = {"stopped": False, "vaults": []}
+        try:
+            self.client.answer(callback_id, "Pausing.")
+        except BotError as exc:
+            self.log(f"bot: {exc}")
+        paused = any(v.get("ok") for v in result.get("vaults", []))
+        if paused:
+            self._done.append(now)  # only a tap that paused a vault counts against the hourly limit
         lines = ["New attempts are stopped." if result.get("stopped") else "The stop flag could not be written."]
         lines += [f"{v['tier']}: {'paused' if v['ok'] else 'NOT paused. ' + v['detail']}" for v in result.get("vaults", [])]
         self.log("bot: pause run, " + ", ".join(f"{v['tier']}={'ok' if v['ok'] else 'failed'}" for v in result.get("vaults", [])))
+        if not paused:
+            lines.append("Nothing was paused. Send /pause to try again.")
         self.client.send(self.owner, "\n".join(lines))
 
 
@@ -260,9 +280,12 @@ def main(argv: list[str] | None = None) -> int:
     except (LiveError, EnvFileError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    problems = {t: key_problem(settings.key_files[t], settings.owner_account(t), settings.vault(t)) for t in settings.key_files}
+    infos: dict[str, dict] = {t: {} for t in settings.key_files}
+    problems = {t: key_problem(settings.key_files[t], settings.owner_account(t), settings.vault(t), info=infos[t])
+                for t in settings.key_files}
     for tier, problem in problems.items():
-        print(f"pause key {tier}: {problem or 'ok'}")
+        extra = f" (gas allowance {infos[tier]['allowance_near']} NEAR)" if infos[tier].get("allowance_near") else ""
+        print(f"pause key {tier}: {problem or 'ok'}{extra if not problem else ''}")
     print(f"bot: owner id set; vaults {settings.vault('fortress')}, {settings.vault('loose')}; network {NETWORK}")
     if any(problems.values()):
         print("error: a pause key is not usable; the bot does not start", file=sys.stderr)

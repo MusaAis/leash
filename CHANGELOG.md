@@ -4,6 +4,18 @@ All notable changes are listed here. Versions follow semantic versioning.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-12
+### Added
+- The Arena: a public injection test with two testnet vaults (a strict one and one with a bait account), a scoreboard, a feed, per-visitor and global limits, a model spending cap and a stop switch.
+- A dashboard with a pause switch behind a token, and a pause-only Telegram bot that can pause both vaults and nothing else.
+### Security
+- The server counts open requests per visitor behind the proxy, ends a slow header or body after five seconds, and keeps connection slots free for the page.
+- The proxy address header is read from its last line and last entry, with a port or brackets removed.
+- A request whose model usage is unknown is charged at the held worst case.
+### Fixed
+- The bot runs the pause before it answers the tap, counts only taps that paused a vault, and tells the owner when nothing was paused.
+- The dashboard refreshes its snapshot outside the lock and uses a five-second view timeout.
+
 ## [0.3.2] - 2026-11-09
 ### Added
 - Contract 0.3.0: a hash chain over every allowed and denied `spend` and `spend_intent` (`get_head_hash`); the views `would_spend` and `would_spend_intent`, which run the same checks as the real methods; refusals for an agent that is the owner, the vault, the guardian or the wNEAR contract, and for a guardian or wNEAR contract that is the owner, the vault or an agent. A fresh deploy is needed: the state layout changed and there is no `migrate`.

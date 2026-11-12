@@ -58,7 +58,7 @@
         else if (x.code === 429) { result.textContent = "Locked for a minute after wrong tokens."; }
         else { result.textContent = "Not done (" + x.code + ")."; }
       })
-      .catch(function () { result.textContent = "The request failed."; })
+      .catch(function () { result.textContent = "No answer arrived. The pause may still have run: check the status below before trying again."; load(); })
       .then(function () { token = ""; pauseButton.disabled = false; });
   });
 

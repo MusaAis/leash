@@ -147,6 +147,18 @@ class KeyTests(unittest.TestCase):
             raise ChainError("down")
         self.assertIn("function-call", self.check(self.keyfile(), down))
 
+    def test_the_allowance_is_printed_and_an_empty_one_is_refused(self):
+        def keys_with(allowance):
+            return lambda a, n: {"result": {"keys": [{"public_key": "ed25519:PUB", "access_key": {"permission": {
+                "FunctionCall": {"receiver_id": "arenaf-vault.testnet", "method_names": ["pause_all", "pause_agent"],
+                                 "allowance": allowance}}}}]}}
+        info = {}
+        self.assertIsNone(key_problem(self.keyfile(), "arenaf-owner.testnet", "arenaf-vault.testnet",
+                                      keys_with(str(10**23)), True, info))
+        self.assertEqual(info["allowance_near"], "0.1000")
+        self.assertIn("used up", self.check(self.keyfile(), keys_with("0")))
+        self.assertIn("cannot be read", self.check(self.keyfile(), keys_with("lots")))
+
     def test_offline_checks_the_file_only(self):
         self.assertIsNone(self.check(self.keyfile(), None, online=False))
 
@@ -217,6 +229,33 @@ class FlowTests(BotCase):
         self.bot.handle(tap(f"ok:{nonce}"))  # the same button again
         self.assertEqual(len(self.paused), 1)
         self.assertIn("expired", self.client.answers[-1][1])
+
+    def test_the_pause_runs_before_the_acknowledgement_and_survives_its_failure(self):
+        order = []
+        self.client.answer = lambda cid, text: (order.append("answer"), (_ for _ in ()).throw(BotError("late")))[0]
+        original = self.bot.pause
+        self.bot.pause = lambda: (order.append("pause"), original())[1]
+        nonce = self.ask()
+        self.bot.handle(tap(f"ok:{nonce}"))
+        self.assertEqual(order, ["pause", "answer"])
+        self.assertIn("fortress: paused", self.client.sent[-1][1])  # the report still went out
+
+    def test_a_tap_that_paused_nothing_is_not_counted_and_says_so(self):
+        self.bot.pause = lambda: {"stopped": True, "vaults": [{"tier": "fortress", "ok": False, "detail": "x"},
+                                                              {"tier": "loose", "ok": False, "detail": "y"}]}
+        for _ in range(bot.MAX_PAUSES_PER_HOUR + 2):
+            nonce = self.ask()
+            self.bot.handle(tap(f"ok:{nonce}"))
+            self.assertIn("Nothing was paused", self.client.sent[-1][1])
+        self.assertNotIn("Too many", self.client.answers[-1][1])
+
+    def test_a_pause_that_raises_reports_nothing_paused(self):
+        def boom():
+            raise RuntimeError("x")
+        self.bot.pause = boom
+        nonce = self.ask()
+        self.bot.handle(tap(f"ok:{nonce}"))
+        self.assertIn("Nothing was paused", self.client.sent[-1][1])
 
     def test_cancel_and_expiry_do_not_pause(self):
         nonce = self.ask()
