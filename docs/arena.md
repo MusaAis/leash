@@ -72,7 +72,7 @@ The server keeps no raw network address. Limits use a salted hash of the address
 | `/api/dashboard` | GET | The state of both vaults read from the chain. It answers a GET without a token |
 | `/api/panic` | POST | Stops new attempts and pauses both vaults. It needs the pause token in an `Authorization` header |
 
-The page uses no external script, style or font. Its Content-Security-Policy allows only the server's own origin.
+The Arena page is served at `https://leash-arena.taila4b466.ts.net:8443/`. A static landing page at `https://leash-landing-tau.vercel.app/` links to the Arena, the proofs and the code. The Arena page uses no external script, style or font. Its Content-Security-Policy allows only the server's own origin.
 
 ## Run the demo
 

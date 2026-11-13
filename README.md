@@ -17,6 +17,8 @@ LEASH is an on-chain spending-control layer for AI agents on NEAR. The funds sit
 
 [Why it matters](#why-it-matters) · [How it works](#how-it-works) · [Verified results](#verified-results) · [Quick start](#quick-start) · [Agent runtime](#agent-runtime-and-attack-suite) · [NEAR usage](#how-leash-uses-near) · [Documentation](#documentation)
 
+**Live:** [Landing page](https://leash-landing-tau.vercel.app/) · [Arena](https://leash-arena.taila4b466.ts.net:8443/) · [Mainnet proof](docs/mainnet-proof.md) · [Testnet proof](docs/testnet-proof.md)
+
 ## Why it matters
 
 Giving an AI agent a key means trusting it with everything that key controls. If the agent is tricked by prompt injection, buggy or compromised, the funds are gone. Guardrails inside the agent's own process do not help, because a compromised agent bypasses them. LEASH moves the guardrail out of the agent and into a contract the agent cannot change.

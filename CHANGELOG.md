@@ -3,6 +3,8 @@
 All notable changes are listed here. Versions follow semantic versioning.
 
 ## [Unreleased]
+### Changed
+- The README links the landing page, the Arena and both proof pages.
 
 ## [0.4.2] - 2026-11-13
 ### Changed
