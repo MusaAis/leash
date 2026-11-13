@@ -22,7 +22,7 @@ LEASH separates the ability to decide from the ability to pay. The agent decides
 
 | Account | Holds | May do |
 |---|---|---|
-| Vault (`<prefix>-vault.<network>`, on mainnet `leash-vault.near`) | The contract and the funds | Initialize the contract once |
+| Vault (`<prefix>-vault.<network>`, on mainnet `leash2-vault.near`) | The contract and the funds | Initialize the contract once |
 | Owner | Control of policy | Fund, set policy, pause, resume, withdraw |
 | Agent | Gas money only | Call `spend` and `spend_intent` |
 | Guardian | Gas money only | Call `approve_intent`. It cannot spend, and an agent cannot be the guardian |

@@ -79,9 +79,9 @@ The owner can call `withdraw` and `unwrap` at any time, also while agents or the
 
 ## Current mainnet state
 
-The mainnet vault `leash-vault.near` is not locked. Its account has one full-access key. The holder of that key can replace the contract, and with it the policy, and can move the vault's funds. The vault stays unlocked while the contract can still change. The lock is planned for the final vault and removes that key.
+The mainnet vault `leash2-vault.near` is not locked. Its account has one full-access key. The holder of that key can replace the contract, and with it the policy, and can move the vault's funds. The vault stays unlocked while the contract can still change. The lock is planned for the final vault and removes that key.
 
-Each of `leash-guardian.near` and `leash-agent.near` has one full-access key and one function-call key. The guardian's function-call key allows `approve_intent` on the vault. The agent's allows `spend` and `spend_intent`. `make intents-keys` stops when a full-access key file of these accounts is present on the machine it runs on. A holder of a full-access key can act in that account's role inside the caps and can move the account's own balance.
+The guardian role uses a function-call key limited to `approve_intent` on the vault. The agent role uses one limited to `spend` and `spend_intent`. `make intents-keys` stops when a full-access key file of these accounts is present on the machine it runs on. A holder of a full-access key can act in that account's role inside the caps and can move the account's own balance.
 
 The policy caps, the balances and the dates they were read are in the [table of values read from the chain](mainnet-proof.md#values-read-from-the-chain). Read the balance with `get_available_balance`, the caps with `get_policy` and the keys of any account with `near account list-keys <account> network-config mainnet now`.
 

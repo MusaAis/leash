@@ -47,7 +47,7 @@ The model never has a tool loop and never holds a key. See [Agent runtime](agent
 | Active attempts overall | 10 |
 | Model spend | A fixed cap in US dollars, checked before every call |
 
-When the model cap is reached, new attempts are refused and the page keeps showing the recorded attempts.
+When the model cap is reached, new attempts are refused and the page keeps showing the recorded attempts. A call that fails is charged its held worst case, so a provider outage can use the whole cap. The spent total is kept in the budget file in the state folder. Removing that file and restarting the service resets it.
 
 ## Stopping the Arena
 

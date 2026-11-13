@@ -1,16 +1,42 @@
 # Mainnet proof
 
-One vault on NEAR mainnet and one real swap through it, run on 2026-11-04. Every transaction below links to the explorer. Every value is read from the command output or the explorer.
+Two vaults have run on NEAR mainnet. The current vault is `leash2-vault.near`. The first vault ran one real swap on 2026-11-04. Every transaction below links to the explorer. Every value is read from the command output or the explorer.
 
-## Accounts
+## Current vault
 
-- Vault: `leash-vault.near` (contract 0.2.0, not locked)
+- Vault: `leash2-vault.near` (contract 0.3.0, not locked)
+- Guardian: `leash2-guardian.near`
+- Agent: `leash2-agent.near`
+- Owner: the implicit account `839d44f94fb99bb1412c68f2fa8534a8a739a1478d8bb1dc97663d02cca51d09`. Read its keys with `near account list-keys` on mainnet.
+
+| Step | Transaction |
+|---|---|
+| Create `leash2-vault.near` (2.10 NEAR) | [5oKFVK…1mNg8](https://explorer.near.org/transactions/5oKFVKU1X2MrVdRaXVhuzz7dbpkYdjeBm654bb81mNg8) |
+| Create `leash2-guardian.near` (0.08 NEAR) | [HDcGCE…kQDkC](https://explorer.near.org/transactions/HDcGCEaRZCnQLKaJnYALrMMQpxk8RX6gpY17PpxkQDkC) |
+| Create `leash2-agent.near` (0.25 NEAR) | [2qWGbf…c83Gj](https://explorer.near.org/transactions/2qWGbfyB9gWYPqAbDeBamMBaVVG2XucMg3G9cfbc83Gj) |
+| Deploy contract and call `new` | [CjXvHy…PV8tj](https://explorer.near.org/transactions/CjXvHyMdKdwHGeSLna7dNmqiZiomCZmEaBHeHZAPV8tj) |
+| `set_policy`: per-transaction cap 0.15 NEAR, daily cap 0.30 NEAR, one allowlisted account | [ho7wSt…ByvDp](https://explorer.near.org/transactions/ho7wStyxp5uzALEkXL7sEWRaPm8FtYmgs597UXByvDp) |
+| `fund` 0.30 NEAR | [7Wr5oV…GNPZo](https://explorer.near.org/transactions/7Wr5oVfKZEp5gCEnKtvKb6SfLFJSoLdnebFHd7NGNPZo) |
+| `set_intents_config` (wNEAR `wrap.near`, guardian `leash2-guardian.near`) | [6fUtMA…MD3yQ](https://explorer.near.org/transactions/6fUtMAXvnKXCuUxRBGoCc8qbwXxPYRyEFxzugPNMD3yQ) |
+| `set_routes`: one route | [AYwK1M…nRUSg](https://explorer.near.org/transactions/AYwK1MXngwZjuhFNbGKmQGLdbKDWtWBKTN54LKFnRUSg) |
+
+The deployed code is the release artifact of `v0.3.2`: its SHA-256 is `18f112959fc2a6ec4a83489803589c83872c43564e96cd94ac70df1f1113dff0` (see [build](build.md)). `vault-has-code.sh` compares the code hash on chain, `2gMzTHTr2TwtwAaHsXZbKH9nBLi2ZfU9HLMVHG82B8KZ` in base58, with that file.
+
+## Retired vault
+
+Retired vault: `leash-vault.near` held the first mainnet swap. The account was deleted and its name is now controlled by another key. Its transactions remain on chain.
+
+## First swap, through the retired vault
+
+### Accounts
+
+- Vault: `leash-vault.near` (contract 0.2.0, since deleted)
 - Guardian: `leash-guardian.near`. It signs with a function-call key limited to `approve_intent` on the vault.
 - Agent: `leash-agent.near`. It signs with a function-call key limited to `spend` and `spend_intent` on the vault.
 - Owner: the implicit account `839d44f94fb99bb1412c68f2fa8534a8a739a1478d8bb1dc97663d02cca51d09`. Read its keys with `near account list-keys` on mainnet.
 - `make intents-keys` stops when a full-access key file of the guardian or the agent is present on the machine it runs on.
 
-## Transactions
+### Transactions
 
 | Step | Transaction |
 |---|---|
@@ -29,14 +55,14 @@ One vault on NEAR mainnet and one real swap through it, run on 2026-11-04. Every
 
 The quote is a 1Click request and has no transaction. The deployed code hash is `FpXfPq1ejnsvDVAV3LdRD4RAkGVEPfSAmxecYHPUMq1i` (base58), which is the SHA-256 `dc3095a72ed04e2c1dddedaeae5e25044d22ca0fe8426e93643efa01d86858f9` of a 189,825-byte wasm. The same file ran `make demo-testnet` (12 checks passed) and a `spend_intent` rehearsal on testnet before it went to mainnet.
 
-## The swap
+### The swap
 
 - Quote: 0.1 NEAR in, 378,371 units of USDC out (6 decimals, 0.378371 USDC), minimum 374,587, estimate 24 seconds. The guardian verified every field before approving.
 - Approval: expiry 05:17:07 UTC, 17 minutes; the spend ran at 05:02:58 UTC (block 222,973,632) and consumed it. `get_approvals` read back an empty list.
 - Result: 1Click returned status SUCCESS and delivered 0.37853 USDC on Base (quote: 0.378371, minimum 0.374587). The vault's wNEAR balance on `wrap.near` read `"0"`, so no refund was left in the vault.
 - On chain: the vault emitted `intent_sent`; `wrap.near` logged the 0.1 NEAR deposit and the transfer of 0.1 wNEAR from the vault to the deposit address. All receipts succeeded. `get_stats` read 1 allowed and 0 denied; `spent_in_window` read 0.1025 NEAR (the amount plus the two storage deposits).
 
-## Gas, one measured sample
+### Gas, one measured sample
 
 | Receipt | Burnt gas |
 |---|---|
@@ -48,11 +74,11 @@ The quote is a 1Click request and has no transaction. The deployed code hash is 
 
 The refunds to the agent (0.042629 and 0.10735 NEAR) are the part of the gas reservation that was not burnt. The key allowances fell only by the fees: guardian 0.07 to 0.06977 NEAR, agent 0.31 to 0.30906 NEAR. The gas constants in the contract (120 Tgas minimum prepaid, 10 Tgas per action) were not changed; this is a single run.
 
-## Balance reading
+### Balance reading
 
 The vault's available balance fell by 0.100134 NEAR. The receipt sent 0.1025 NEAR (0.1 plus two storage deposits of 0.00125). The difference of 0.002366 NEAR is the storage released when the approval record was removed, as in the testnet run. Afterwards `storage_balance_of` for the vault on `wrap.near` read 0.00125 NEAR, so the vault is now registered there.
 
-## Deployment notes
+### Deployment notes
 
 The first deploy was rejected with a link error ("unknown or invalid import") and left the account without code. The build made with `near-sdk` 5.28.3 deployed. Mainnet read protocol version 86 and testnet 88 on the same day; the rejected build used `near-sdk` 5.30.0.
 
@@ -60,13 +86,14 @@ The first deploy was rejected with a link error ("unknown or invalid import") an
 
 | Value | Reading | Read on |
 |---|---|---|
-| Vault available balance, above the 0.1 NEAR contract reserve | 0.2874 NEAR (`get_available_balance`) | 2026-11-06 |
-| Agent policy caps | 0.15 NEAR per transaction, 0.30 NEAR per 24 hours (`get_policy`) | 2026-11-06 |
-| `leash-guardian.near` balance | 0.080 NEAR | 2026-11-05 |
-| `leash-agent.near` balance | 0.250 NEAR | 2026-11-05 |
+| Code on `leash2-vault.near` | SHA-256 `18f112959fc2a6ec4a83489803589c83872c43564e96cd94ac70df1f1113dff0` (`vault-has-code.sh`) | 2026-11-13 |
+| Head hash | 64 zeros (`get_head_hash`) | 2026-11-13 |
+| Agent policy caps | 0.15 NEAR per transaction, 0.30 NEAR per 24 hours, not paused (`get_policy`) | 2026-11-13 |
+| Guardian and wNEAR contract | `leash2-guardian.near` (`get_guardian`), `wrap.near` (`get_wnear`) | 2026-11-13 |
+| Routes | one (`get_routes`) | 2026-11-13 |
 
 ## Limits of this proof
 
 - One swap, one gas sample. The vault does not wait for settlement; 1Click returned status SUCCESS for this swap.
-- The vault is not locked and the guardian link to the owner's route is checked off-chain, as described in [security](security.md) and [ADR 0005](adr/0005-intents-design-and-trust.md).
+- The current vault is not locked and the guardian link to the owner's route is checked off-chain, as described in [security](security.md) and [ADR 0005](adr/0005-intents-design-and-trust.md).
 - The recipient of a route is readable on the chain through `get_routes`.

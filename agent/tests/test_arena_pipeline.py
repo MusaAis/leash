@@ -333,6 +333,33 @@ class BudgetTests(ArenaCase):
         self.assertEqual(result.record["outcome"], "model_error")
         self.assertGreaterEqual(result.record["tokens"], 4000)  # the held worst case, not the counter's 0
 
+    def test_a_brain_that_cannot_be_built_is_charged_nothing(self):
+        arena = self.make()
+
+        def no_brain():
+            raise RuntimeError("no key")
+
+        arena.brain_factory = no_brain
+        result = arena.attempt("loose", "a", "hi")
+        self.assertEqual(result.record["outcome"], "model_error")
+        self.assertEqual(result.record["tokens"], 0)
+        self.assertEqual(result.record["cost_micro_usd"], 0)
+        self.assertEqual(self.budget._held, 0)
+
+    def test_a_call_that_returns_no_decision_is_charged_the_worst_case(self):
+        arena = self.make()
+
+        class EmptyBrain:
+            tokens_used = 50
+
+            def decide(self, task):
+                return None
+
+        arena.brain_factory = EmptyBrain
+        result = arena.attempt("loose", "a", "hi")
+        self.assertEqual(result.record["outcome"], "model_error")
+        self.assertGreaterEqual(result.record["tokens"], 4000)
+
     def test_a_damaged_budget_file_means_replay(self):
         (self.base / "budget.json").write_text("{broken")
         arena = self.make(refuse())

@@ -4,9 +4,10 @@
 .dash #status { margin-top: .5rem; }
 .vaults { display: grid; gap: 1rem; margin-top: 1.8rem; grid-template-columns: 1fr; }
 @media (min-width: 52rem) { .vaults { grid-template-columns: 1fr 1fr; } }
-.card { background: var(--panel); border: 1px solid var(--line-strong); border-radius: 1.1rem; padding: 1.2rem 1.3rem 1.3rem; box-shadow: var(--shadow); min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--r); padding: var(--pad); box-shadow: var(--glow); min-width: 0; }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: .8rem; }
 .card h2 { font-size: 1.15rem; text-transform: capitalize; }
+.dash h1 { font-weight: 800; }
 .state { font-size: .82rem; font-weight: 700; padding: .25rem .65rem; border-radius: 999px; border: 1px solid var(--safe); color: var(--safe); }
 .state.bad { border-color: var(--bad); color: var(--bad); }
 .balance { margin-top: 1rem; font-size: clamp(2.2rem, 7vw, 3rem); line-height: 1; font-weight: 800; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
@@ -17,13 +18,13 @@ dt { color: var(--muted); font-size: .9rem; }
 dd { margin: 0; overflow-wrap: anywhere; word-break: break-all; font: .86rem/1.45 var(--mono); }
 .ok { color: var(--safe); }
 .bad { color: var(--bad); font-weight: 700; }
-.panic { margin-top: 2rem; padding: 1.3rem; border: 1px solid var(--bad); border-radius: 1.1rem; background: var(--panel); max-width: 34rem; }
+.panic { margin-top: 2rem; padding: var(--pad); border: 1px solid var(--bad); border-radius: var(--r); background: var(--panel); max-width: 34rem; }
 .panic h2 { color: var(--bad); }
 .panic p { margin-top: .4rem; color: var(--muted); }
 .panic label { display: block; margin-top: 1.1rem; font-weight: 650; font-size: .92rem; }
-.panic input { width: 100%; margin: .4rem 0 .9rem; min-height: 3rem; padding: .6rem .85rem; border-radius: .75rem; border: 1px solid var(--line-strong); background: var(--bg); color: var(--ink); font: inherit; }
+.panic input { width: 100%; margin: .4rem 0 .9rem; min-height: 3rem; padding: .6rem .85rem; border-radius: 99px; border: 1px solid var(--line-strong); background: var(--bg); color: var(--ink); font: inherit; }
 .panic input:focus-visible { border-color: var(--bad); outline-offset: 0; }
-.panic button { width: 100%; min-height: 3.2rem; border: 0; border-radius: .75rem; background: var(--bad); color: #fff; font: 750 1rem var(--sans); cursor: pointer; }
+.panic button { width: 100%; min-height: 3.2rem; border: 0; border-radius: 99px; background: var(--bad); color: #fff; font: 750 1rem var(--sans); cursor: pointer; }
 .panic button:hover:not(:disabled) { filter: brightness(1.08); }
 .panic button:disabled { opacity: .5; cursor: not-allowed; }
 .panic #panic-result { min-height: 1.5rem; margin-top: .8rem; color: var(--ink); }

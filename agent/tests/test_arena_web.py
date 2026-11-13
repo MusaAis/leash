@@ -137,5 +137,22 @@ class ScriptTests(unittest.TestCase):
         self.assertNotRegex(HTML + CSS + JS, r"<img|background-image|\.png|\.svg")
 
 
+    def test_counts_pass_through_one_number_guard_and_no_progress_element(self):
+        script = (WEB / "arena.js").read_text() if "WEB" in globals() else None
+        if script is None:
+            script = (Path(__file__).resolve().parents[2] / "web" / "arena.js").read_text()
+        self.assertIn("isFinite(value)", script)
+        self.assertNotIn("progress", script)
+        self.assertGreaterEqual(script.count("num(t."), 6)
+
+    def test_a_drawing_error_is_not_shown_as_not_reachable(self):
+        script = (Path(__file__).resolve().parents[2] / "web" / "arena.js").read_text()
+        start = script.index("function refresh()")
+        body = script[start:script.index("function submit(", start)]
+        self.assertIn("try {", body)
+        self.assertIn("could not draw", body)
+        self.assertEqual(body.count("showOffline"), 2)  # a bad answer and a failed request only
+
+
 if __name__ == "__main__":
     unittest.main()
