@@ -8,14 +8,14 @@
 
   // Each outcome: the sentence shown, and a tone for the feed and the result box.
   var OUTCOMES = {
-    refused: { text: "The agent refused.", tone: "safe" },
-    paid_payee: { text: "The agent paid the payee.", tone: "info" },
-    blocked: { text: "The agent tried to pay. The vault blocked it.", tone: "safe" },
-    paid_other: { text: "The vault paid the wrong account. Funds lost.", tone: "bad" },
-    stopped: { text: "The Arena was stopped before the payment.", tone: "warn" },
-    transfer_failed: { text: "The vault allowed it, but the money did not arrive. No funds lost.", tone: "warn" },
-    chain_error: { text: "The vault call failed.", tone: "warn" },
-    model_error: { text: "The model call failed.", tone: "warn" }
+    refused: { text: "The agent refused.", chip: "Refused", tone: "safe" },
+    paid_payee: { text: "The agent paid the payee.", chip: "Paid the payee", tone: "info" },
+    blocked: { text: "The agent tried to pay. The vault blocked it.", chip: "Vault blocked", tone: "safe" },
+    paid_other: { text: "The vault paid the wrong account. Funds lost.", chip: "Funds lost", tone: "bad" },
+    stopped: { text: "The Arena was stopped before the payment.", chip: "Stopped", tone: "warn" },
+    transfer_failed: { text: "The vault allowed it, but the money did not arrive. No funds lost.", chip: "No transfer", tone: "warn" },
+    chain_error: { text: "The vault call failed.", chip: "Call failed", tone: "warn" },
+    model_error: { text: "The model call failed.", chip: "Model failed", tone: "warn" }
   };
 
   function outcomeOf(key, fallback) {
@@ -46,6 +46,10 @@
     return node;
   }
 
+  function num(value) {
+    return typeof value === "number" && isFinite(value) ? value : 0;
+  }
+
   function clear(node) {
     while (node.firstChild) { node.removeChild(node.firstChild); }
   }
@@ -61,7 +65,7 @@
     if (seconds < 45) { return "just now"; }
     if (seconds < 3600) { return Math.round(seconds / 60) + " min ago"; }
     if (seconds < 86400) { return Math.round(seconds / 3600) + " h ago"; }
-    return date.toLocaleDateString();
+    return date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
   }
 
   function txLink(txId) {
@@ -128,34 +132,40 @@
 
     var list = $("tier-list");
     clear(list);
-    ["fortress", "loose"].forEach(function (name) {
-      var tier = stats.tiers[name];
-      if (!tier) { return; }
-      var card = make("li", "tier-card");
-      var head = make("h3", "", tierName(name));
-      head.appendChild(make("span", "count", plural(tier.attempts, "attempt", "attempts")));
-      card.appendChild(head);
-      var rows = make("div", "rows");
-      [
-        ["Agent refused", tier.refused || 0, "good"],
-        ["Vault blocked", tier.blocked || 0, "good"],
-        ["Paid the payee", tier.paid_payee || 0, ""],
-        ["Agent fooled", tier.fooled, tier.fooled > 0 ? "warn" : ""],
-        ["Funds lost", tier.funds_lost_near + " NEAR", tier.funds_lost_count > 0 ? "bad" : ""]
-      ].forEach(function (entry) {
-        var row = make("div", "row" + (entry[2] ? " " + entry[2] : ""));
-        row.appendChild(make("span", "row-name", entry[0]));
-        row.appendChild(make("span", "row-num", entry[1]));
-        var bar = make("progress");
-        bar.max = Math.max(1, tier.attempts);
-        bar.value = typeof entry[1] === "number" ? entry[1] : tier.funds_lost_count;
-        bar.setAttribute("aria-hidden", "true");
-        row.appendChild(bar);
-        rows.appendChild(row);
+    var names = ["fortress", "loose"].filter(function (name) { return stats.tiers[name]; });
+    var table = make("table");
+    var headRow = make("tr");
+    headRow.appendChild(make("th"));
+    names.forEach(function (name) {
+      var cell = make("th", "", tierName(name));
+      cell.setAttribute("scope", "col");
+      headRow.appendChild(cell);
+    });
+    table.appendChild(make("thead")).appendChild(headRow);
+    var body = make("tbody");
+    [
+      ["Attempts", function (t) { return num(t.attempts); }, "", ""],
+      ["Agent refused", function (t) { return num(t.refused); }, "", ""],
+      ["Vault blocked", function (t) { return num(t.blocked); }, "", ""],
+      ["Paid the payee", function (t) { return num(t.paid_payee); }, "", ""],
+      ["Agent fooled", function (t) { return num(t.fooled); }, "key", "warn"],
+      ["Funds lost", function (t) { return num(t.funds_lost_near) + " NEAR"; }, "key", "bad"]
+    ].forEach(function (spec) {
+      var tr = make("tr", spec[2]);
+      var label = make("th", "", spec[0]);
+      label.setAttribute("scope", "row");
+      tr.appendChild(label);
+      names.forEach(function (name) {
+        var t = stats.tiers[name];
+        var hot = spec[3] === "warn" ? num(t.fooled) > 0 : spec[3] === "bad" ? num(t.funds_lost_count) > 0 : false;
+        tr.appendChild(make("td", hot ? spec[3] : "", spec[1](t)));
       });
-      card.appendChild(rows);
-      list.appendChild(card);
-
+      body.appendChild(tr);
+    });
+    table.appendChild(body);
+    list.appendChild(table);
+    names.forEach(function (name) {
+      var tier = stats.tiers[name];
       var meta = $(name + "-meta");
       if (meta) {
         var text = "vault " + tier.vault + " · payee " + tier.payee;
@@ -185,12 +195,13 @@
     var banner = $("banner");
     banner.textContent = note;
     banner.hidden = note === "";
+    document.body.classList.remove("loading");
     $("send").disabled = busy || (stats.mode !== "demo" && (stats.paused || stats.replay));
   }
 
   // ---- feed -------------------------------------------------------------------
   function feedItem(record) {
-    var outcome = outcomeOf(record.outcome, { text: "Recorded.", tone: "warn" });
+    var outcome = outcomeOf(record.outcome, { text: "Recorded.", chip: "Recorded", tone: "warn" });
     var item = make("li", "item");
     var head = make("div", "item-head");
     head.appendChild(make("span", "badge", tierName(record.tier)));
@@ -203,12 +214,23 @@
       head.appendChild(time);
     }
     item.appendChild(head);
-    item.appendChild(make("p", "item-msg", record.message || ""));
-    item.appendChild(trail(record.outcome, false));
-    item.appendChild(make("p", "outcome", outcome.text));
+    var message = make("button", "item-msg", record.message || "");
+    message.type = "button";
+    message.setAttribute("aria-expanded", "false");
+    item.appendChild(message);
+    var foot = make("div", "item-foot");
+    foot.appendChild(make("span", "out " + outcome.tone, outcome.chip || outcome.text));
     var link = txLink(record.tx_id);
-    if (link) { item.appendChild(link); }
+    if (link) { foot.appendChild(link); }
+    item.appendChild(foot);
     return item;
+  }
+
+  function toggleMessage(event) {
+    var button = event.target.closest("button.item-msg");
+    if (!button) { return; }
+    var open = button.parentNode.classList.toggle("open");
+    button.setAttribute("aria-expanded", open ? "true" : "false");
   }
 
   function showFeed(records) {
@@ -230,7 +252,9 @@
     });
     if (link) { box.appendChild(link); }
     box.hidden = false;
-    box.focus();
+    box.focus({ preventScroll: true });
+    var calm = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    box.scrollIntoView({ behavior: calm ? "auto" : "smooth", block: "nearest" });
   }
 
   function showAttempt(data) {
@@ -258,6 +282,7 @@
   }
 
   function showOffline() {
+    document.body.classList.remove("loading");
     $("status-pill").setAttribute("data-state", "offline");
     $("status-text").textContent = "Not reachable";
     var banner = $("banner");
@@ -269,8 +294,14 @@
   function refresh() {
     return Promise.all([request("/api/stats"), request("/api/feed?limit=20")]).then(function (answers) {
       if (!answers[0].ok) { showOffline(); return; }
-      showStats(answers[0].data);
-      if (answers[1].ok) { showFeed(answers[1].data.records || []); }
+      try {
+        showStats(answers[0].data);
+        if (answers[1].ok) { showFeed(answers[1].data.records || []); }
+      } catch (error) {
+        var note = $("banner");
+        note.textContent = "The page could not draw the latest numbers. It tries again in a few seconds.";
+        note.hidden = false;
+      }
     }).catch(showOffline);
   }
 
@@ -333,6 +364,7 @@
     }
   }
 
+  $("feed").addEventListener("click", toggleMessage);
   $("form").addEventListener("submit", submit);
   $("message").addEventListener("input", countCharacters);
   $("message").addEventListener("keydown", sendOnShortcut);

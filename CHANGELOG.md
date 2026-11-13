@@ -4,7 +4,20 @@ All notable changes are listed here. Versions follow semantic versioning.
 
 ## [Unreleased]
 
-## [0.4.1] - 2026-11-12
+## [0.4.2] - 2026-11-13
+### Changed
+- The Arena page and the dashboard share one calmer design: a pinned try-it form on wide screens, a two-step Agent and Vault result, compact feed rows that expand on tap, and a results table per vault.
+- Mainnet documentation names the current vault `leash2-vault.near` with its setup transactions. The first vault is described as retired on its proof page.
+- A model call that returns no decision is charged the held worst case, like a call that raised.
+### Added
+- A static landing page in `landing/` with the proof links and a button to the Arena.
+- Docs checks: the retired vault name may appear only on its proof page and in this changelog, and each changelog date equals the UTC date of its tag.
+- Tests: a failed pause logs the exception class and never its text; an attempt whose brain cannot be built is charged nothing; the page keeps a drawing error apart from an unreachable server.
+### Fixed
+- A counter that is missing or not a number draws as 0 instead of stopping the scoreboard.
+- The changelog dates of 0.4.0 and 0.4.1 use the UTC date of their tags.
+
+## [0.4.1] - 2026-11-13
 ### Security
 - The server counts open requests per visitor behind the proxy, ends a slow header or body after five seconds, and keeps connection slots free for the page.
 - The proxy address header is read from its last line and last entry, with a port or brackets removed.
@@ -15,7 +28,7 @@ All notable changes are listed here. Versions follow semantic versioning.
 ### Changed
 - A new design for the Arena page and the dashboard: a two-step view of each attempt (the agent, then the vault), results by vault, and a clear message when the Arena does not answer.
 
-## [0.4.0] - 2026-11-12
+## [0.4.0] - 2026-11-11
 ### Added
 - The Arena: a public injection test with two testnet vaults (a strict one and one with a bait account), a scoreboard, a feed, per-visitor and global limits, a model spending cap and a stop switch.
 - A dashboard with a pause switch behind a token, and a pause-only Telegram bot that can pause both vaults and nothing else.

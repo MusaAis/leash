@@ -142,6 +142,31 @@ class DocsChecks(unittest.TestCase):
 
 
 
+class RetiredVaultTests(unittest.TestCase):
+    NAME = "leash-vault" + ".near"
+
+    def test_the_name_on_a_guide_page_fails(self):
+        for page in ("README.md", "docs/security.md", "docs/architecture.md", "docs/build.md", "docs/STATE.md", "docs/adr/0005.md"):
+            self.assertTrue(cd.retired_name_problems({page: f"the vault is {self.NAME} today"}), page)
+
+    def test_the_name_on_its_two_pages_and_the_new_name_pass(self):
+        self.assertEqual(cd.retired_name_problems({"docs/mainnet-proof.md": self.NAME, "CHANGELOG.md": self.NAME}), [])
+        self.assertEqual(cd.retired_name_problems({"docs/security.md": "the vault is leash2-vault.near"}), [])
+
+
+class ChangelogDateTests(unittest.TestCase):
+    LOG = "## [0.4.1] - 2026-11-13\n\n## [0.4.0] - 2026-11-11\n"
+
+    def test_a_date_that_differs_from_the_tag_fails(self):
+        bad = cd.changelog_date_problems(self.LOG, {"v0.4.1": "2026-11-12", "v0.4.0": "2026-11-11"})
+        self.assertEqual(len(bad), 1)
+        self.assertIn("0.4.1", bad[0])
+
+    def test_matching_dates_and_a_version_without_a_tag_pass(self):
+        self.assertEqual(cd.changelog_date_problems(self.LOG, {"v0.4.1": "2026-11-13", "v0.4.0": "2026-11-11"}), [])
+        self.assertEqual(cd.changelog_date_problems(self.LOG, {}), [])
+
+
 class ContractVersionTests(unittest.TestCase):
     def test_version_in_guide_pages(self):
         cargo = 'name = "leash"\nversion = "0.3.0"\n'

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0f1520" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#e9ecf1" media="(prefers-color-scheme: light)">
+<meta name="description" content="LEASH is an on-chain spend-limit layer for AI agents on NEAR. The vault enforces the owner's limits, not the agent.">
+<title>LEASH: give AI money, keep the leash</title>
+<link rel="stylesheet" href="/landing.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap bar">
+    <a class="brand" href="/" aria-label="LEASH">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="8.5" cy="14.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12.6 10.8 19.5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="20" cy="4.6" r="1.9" fill="currentColor"/></svg>
+      <span class="brand-name">LEASH</span>
+    </a>
+    <div class="bar-end"><span class="net">Built for NEAR HACKATHON</span></div>
+  </div>
+</header>
+<main class="wrap">
+  <section class="hero" aria-labelledby="h">
+    <h1 id="h">Give AI money. Keep the leash.</h1>
+    <p class="lede">LEASH holds an agent's funds in a vault contract on NEAR. The agent can only ask the vault to pay. The vault enforces the owner's limits on-chain, so a tricked or hijacked agent cannot move money outside its policy.</p>
+    <div class="actions">
+      <a class="btn main" href="https://leash-arena.taila4b466.ts.net:8443/">Try the Arena</a>
+      <a class="btn" href="https://github.com/MusaAis/leash">View the code</a>
+    </div>
+  </section>
+
+  <section class="band" aria-labelledby="how">
+    <h2 id="how">How it works</h2>
+    <div class="cols">
+      <div class="tile"><h3>The owner sets the rules</h3><p>Funds sit in the vault. Each agent gets a policy: a cap per payment, a daily cap and an allowlist of accounts.</p></div>
+      <div class="tile"><h3>The agent asks</h3><p>The agent holds only gas money. It calls the vault to pay and never holds the funds or the rules.</p></div>
+      <div class="tile"><h3>The vault decides</h3><p>Allowed payments move. Denied ones are recorded on-chain with a reason. The owner can pause one agent or all of them at any time.</p></div>
+    </div>
+  </section>
+
+  <section class="band" aria-labelledby="proof">
+    <h2 id="proof">Read the evidence</h2>
+    <div class="links">
+      <a href="https://github.com/MusaAis/leash/blob/main/docs/mainnet-proof.md">Mainnet proof<span>Transactions from a real swap through a vault.</span></a>
+      <a href="https://github.com/MusaAis/leash/blob/main/docs/testnet-proof.md">Testnet proof<span>Recorded runs with transaction links.</span></a>
+      <a href="https://github.com/MusaAis/leash/blob/main/docs/security.md">Security model<span>What is enforced on-chain, and its limits.</span></a>
+    </div>
+  </section>
+
+  <section class="band" aria-labelledby="try">
+    <h2 id="try">Try to break it</h2>
+    <p class="lede">A live agent holds a testnet vault and may pay one payee only. Send it any message. The Arena counts two numbers: how often the agent is fooled, and how much money is lost.</p>
+    <div class="actions"><a class="btn main" href="https://leash-arena.taila4b466.ts.net:8443/">Open the Arena</a></div>
+  </section>
+</main>
+<footer class="wrap foot">
+  <a href="https://github.com/MusaAis/leash">Repository</a><a href="https://github.com/MusaAis/leash/tree/main/docs">Documentation</a>
+</footer>
+</body>
+</html>

@@ -8,6 +8,7 @@ those come from a recorded run (see docs/testnet-proof.md).
 
 from __future__ import annotations
 
+import os
 import posixpath
 import re
 import subprocess
@@ -400,6 +401,40 @@ def check_anchors() -> list[str]:
     targets = {d: text(d) for d in doc_paths()}
     return [p for d in targets for p in anchor_gaps(d, targets[d], targets)]
 
+RETIRED_NAME = "leash-vault" + ".near"
+RETIRED_PAGES = ("docs/mainnet-proof.md", "CHANGELOG.md")
+
+
+def retired_name_problems(pages: dict[str, str]) -> list[str]:
+    return [f"{name} names the retired vault {RETIRED_NAME}; only {' and '.join(RETIRED_PAGES)} may"
+            for name, body in pages.items() if name not in RETIRED_PAGES and RETIRED_NAME in body]
+
+
+def check_retired_name() -> list[str]:
+    return retired_name_problems({d: text(d) for d in doc_paths()})
+
+
+def changelog_date_problems(changelog: str, tag_dates: dict[str, str]) -> list[str]:
+    problems = []
+    for version, date in re.findall(r"^## \[(\d+\.\d+\.\d+(?:-fix\d+)?)\] - (\d{4}-\d{2}-\d{2})", changelog, re.M):
+        tag = tag_dates.get("v" + version)
+        if tag and tag != date:
+            problems.append(f"CHANGELOG.md dates {version} {date}, the tag v{version} was made on {tag} (UTC)")
+    return problems
+
+
+def check_changelog_dates() -> list[str]:
+    env = {**os.environ, "TZ": "UTC"}
+    tags = subprocess.run(["git", "tag", "-l", "v*"], cwd=ROOT, capture_output=True, text=True).stdout.split()
+    dates = {}
+    for tag in tags:
+        out = subprocess.run(["git", "log", "-1", "--format=%cd", "--date=format-local:%F", tag], cwd=ROOT,
+                             capture_output=True, text=True, env=env).stdout.strip()
+        if out:
+            dates[tag] = out
+    return changelog_date_problems(text("CHANGELOG.md"), dates)
+
+
 CHECKS = [
     ("STATE.md and CHANGELOG.md match the git tags", check_versions),
     ("test counts in the docs match the code", check_test_counts),
@@ -420,6 +455,8 @@ CHECKS = [
     ("guide pages name the current contract version", check_contract_version),
     ("artifact hashes in docs/build.md match the mainnet proof", check_wasm_facts),
     ("heading anchors in links exist", check_anchors),
+    ("the retired vault is named only on its proof page and in the changelog", check_retired_name),
+    ("changelog dates equal the UTC date of their tag", check_changelog_dates),
 ]
 
 if __name__ == "__main__":

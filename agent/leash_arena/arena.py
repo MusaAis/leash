@@ -127,7 +127,7 @@ class Arena:
             used = getattr(brain, "tokens_used", None)
             if brain is None:
                 tokens = 0  # nothing was sent
-            elif error is not None:  # the call raised: a request may have been sent, its usage is unknown
+            elif error is not None or decision is None:  # the call raised or gave nothing: a request may have been sent, its usage is unknown
                 tokens = worst
             elif isinstance(used, int) and not isinstance(used, bool) and used >= 0:
                 tokens = used

@@ -257,6 +257,16 @@ class FlowTests(BotCase):
         self.bot.handle(tap(f"ok:{nonce}"))
         self.assertIn("Nothing was paused", self.client.sent[-1][1])
 
+    def test_a_failed_pause_logs_the_class_and_never_the_text(self):
+        def boom():
+            raise RuntimeError("secret-token-123")
+        self.bot.pause = boom
+        nonce = self.ask()
+        self.bot.handle(tap(f"ok:{nonce}"))
+        joined = " ".join(self.logs)
+        self.assertIn("RuntimeError", joined)
+        self.assertNotIn("secret-token-123", joined)
+
     def test_cancel_and_expiry_do_not_pause(self):
         nonce = self.ask()
         self.bot.handle(tap(f"no:{nonce}"))
