@@ -205,7 +205,8 @@ class PauseBot:
             return self.client.answer(callback_id, "Too many pauses this hour.")
         try:
             result = self.pause()  # the work first: a slow or failing acknowledgement must not hold it back
-        except Exception:
+        except Exception as exc:
+            self.log(f"bot: pause failed ({type(exc).__name__})")  # the class only, never the text
             result = {"stopped": False, "vaults": []}
         try:
             self.client.answer(callback_id, "Pausing.")

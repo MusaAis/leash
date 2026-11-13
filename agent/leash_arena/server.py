@@ -417,10 +417,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(415, "unsupported_media_type")
         if not self.server._posts.acquire(blocking=False):  # slots kept free for the page and the feed
             return self._error(429, "busy", {"Retry-After": "5"})
-        try:
-            raw = self.rfile.read(length)
+        try:  # the slot is held for the whole request, so waiting attempts cannot fill every connection
+            self._read_and_run(length)
         finally:
             self.server._posts.release()
+
+    def _read_and_run(self, length: int) -> None:
+        raw = self.rfile.read(length)
         self._deadline.cancel()  # the visitor sent everything; the model call may take longer
         if len(raw) != length:
             return self._error(400, "bad_request")

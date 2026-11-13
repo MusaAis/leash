@@ -4,10 +4,7 @@ All notable changes are listed here. Versions follow semantic versioning.
 
 ## [Unreleased]
 
-## [0.4.0] - 2026-11-12
-### Added
-- The Arena: a public injection test with two testnet vaults (a strict one and one with a bait account), a scoreboard, a feed, per-visitor and global limits, a model spending cap and a stop switch.
-- A dashboard with a pause switch behind a token, and a pause-only Telegram bot that can pause both vaults and nothing else.
+## [0.4.1] - 2026-11-12
 ### Security
 - The server counts open requests per visitor behind the proxy, ends a slow header or body after five seconds, and keeps connection slots free for the page.
 - The proxy address header is read from its last line and last entry, with a port or brackets removed.
@@ -15,6 +12,13 @@ All notable changes are listed here. Versions follow semantic versioning.
 ### Fixed
 - The bot runs the pause before it answers the tap, counts only taps that paused a vault, and tells the owner when nothing was paused.
 - The dashboard refreshes its snapshot outside the lock and uses a five-second view timeout.
+### Changed
+- A new design for the Arena page and the dashboard: a two-step view of each attempt (the agent, then the vault), results by vault, and a clear message when the Arena does not answer.
+
+## [0.4.0] - 2026-11-12
+### Added
+- The Arena: a public injection test with two testnet vaults (a strict one and one with a bait account), a scoreboard, a feed, per-visitor and global limits, a model spending cap and a stop switch.
+- A dashboard with a pause switch behind a token, and a pause-only Telegram bot that can pause both vaults and nothing else.
 
 ## [0.3.2] - 2026-11-09
 ### Added

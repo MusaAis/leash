@@ -497,8 +497,45 @@ class BodyDeadlineTests(ServerCase):
         self.assertEqual((REQUEST_DEADLINE_SECONDS, BODY_DEADLINE_SECONDS), (5.0, 5.0))
 
 
+class SlowGetTests(ServerCase):
+    request_deadline = 0.3
+
+    def test_a_slow_read_is_not_cut_by_the_request_deadline(self):
+        real = self.arena.stats
+
+        def slow():
+            time.sleep(0.9)
+            return real()
+
+        self.arena.stats = slow
+        status, _, body = self.call("GET", "/api/stats")
+        self.assertEqual(status, 200)
+
+
 class PostReserveTests(ServerCase):
     max_connections = 4
+
+    def test_the_post_slot_is_held_until_the_attempt_ends(self):
+        import threading
+        inside, leave = threading.Event(), threading.Event()
+        real = self.arena.attempt
+
+        def slow(*args):
+            inside.set()
+            leave.wait(5)
+            return real(*args)
+
+        self.arena.attempt = slow
+        worker = threading.Thread(target=self.attempt, args=("hello",))
+        worker.start()
+        self.assertTrue(inside.wait(5))
+        self.assertEqual(self.server._posts._value, 1)  # one of two slots is in use while the attempt runs
+        leave.set()
+        worker.join(5)
+        deadline = time.time() + 3
+        while time.time() < deadline and self.server._posts._value != 2:
+            time.sleep(0.02)
+        self.assertEqual(self.server._posts._value, 2)
 
     def test_post_slots_leave_room_for_reads(self):
         self.assertEqual(self.server._posts._value, 2)  # four connections, two kept for GET
