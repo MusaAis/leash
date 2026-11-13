@@ -22,6 +22,19 @@
     return Object.prototype.hasOwnProperty.call(OUTCOMES, key) ? OUTCOMES[key] : fallback;
   }
 
+  // Each attempt passes two gates: the agent, then the vault. State: hold = this gate stopped it,
+  // pass = it let the request through, fail = it let the wrong payment through, warn = unclear, idle = never reached.
+  var GATES = {
+    refused: [["hold", "Refused"], ["idle", "Not asked"]],
+    blocked: [["pass", "Tried to pay"], ["hold", "Blocked"]],
+    paid_payee: [["pass", "Paid the payee"], ["pass", "Allowed"]],
+    paid_other: [["fail", "Decided to pay"], ["fail", "Paid out"]],
+    transfer_failed: [["pass", "Tried to pay"], ["warn", "Allowed, no transfer"]],
+    stopped: [["warn", "Stopped"], ["idle", "Not asked"]],
+    chain_error: [["pass", "Tried to pay"], ["warn", "Call failed"]],
+    model_error: [["warn", "Model failed"], ["idle", "Not asked"]]
+  };
+
   var known = { invoice: "0.01", bait: "attacker.testnet" };
 
   function $(id) { return document.getElementById(id); }
@@ -60,6 +73,19 @@
     return link;
   }
 
+
+  function trail(outcomeKey, animate) {
+    var gates = Object.prototype.hasOwnProperty.call(GATES, outcomeKey) ? GATES[outcomeKey] : [["warn", "Recorded"], ["idle", "Not asked"]];
+    var list = make("ol", "trail" + (animate ? " reveal" : ""));
+    ["Agent", "Vault"].forEach(function (name, index) {
+      var gate = make("li", "gate " + gates[index][0]);
+      gate.appendChild(make("span", "gate-name", name));
+      gate.appendChild(make("span", "gate-state", gates[index][1]));
+      list.appendChild(gate);
+    });
+    return list;
+  }
+
   // The page may be served from another address than the API. The address is read from one meta tag
   // and must be a plain https origin; anything else means "the same address as the page".
   var API_ORIGIN = /^https:\/\/[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$/;
@@ -90,8 +116,6 @@
     if (tone) { node.classList.add(tone); }
   }
 
-  function tag(text, tone) { return make("span", "tag" + (tone ? " " + tone : ""), text); }
-
   function showStats(stats) {
     var total = stats.total;
     $("fooled-value").textContent = String(total.fooled);
@@ -111,13 +135,25 @@
       var head = make("h3", "", tierName(name));
       head.appendChild(make("span", "count", plural(tier.attempts, "attempt", "attempts")));
       card.appendChild(head);
-      var chips = make("div", "tier-chips");
-      chips.appendChild(tag("agent refused " + (tier.refused || 0), "good"));
-      chips.appendChild(tag("vault blocked " + (tier.blocked || 0), "good"));
-      chips.appendChild(tag("paid payee " + (tier.paid_payee || 0)));
-      chips.appendChild(tag("fooled " + tier.fooled, tier.fooled > 0 ? "warn" : ""));
-      chips.appendChild(tag("lost " + tier.funds_lost_near + " NEAR", tier.funds_lost_count > 0 ? "bad" : ""));
-      card.appendChild(chips);
+      var rows = make("div", "rows");
+      [
+        ["Agent refused", tier.refused || 0, "good"],
+        ["Vault blocked", tier.blocked || 0, "good"],
+        ["Paid the payee", tier.paid_payee || 0, ""],
+        ["Agent fooled", tier.fooled, tier.fooled > 0 ? "warn" : ""],
+        ["Funds lost", tier.funds_lost_near + " NEAR", tier.funds_lost_count > 0 ? "bad" : ""]
+      ].forEach(function (entry) {
+        var row = make("div", "row" + (entry[2] ? " " + entry[2] : ""));
+        row.appendChild(make("span", "row-name", entry[0]));
+        row.appendChild(make("span", "row-num", entry[1]));
+        var bar = make("progress");
+        bar.max = Math.max(1, tier.attempts);
+        bar.value = typeof entry[1] === "number" ? entry[1] : tier.funds_lost_count;
+        bar.setAttribute("aria-hidden", "true");
+        row.appendChild(bar);
+        rows.appendChild(row);
+      });
+      card.appendChild(rows);
       list.appendChild(card);
 
       var meta = $(name + "-meta");
@@ -132,7 +168,7 @@
     }
 
     var state = "live";
-    var label = "Live · accepting attempts";
+    var label = "Live";
     var note = "";
     if (stats.mode === "demo") {
       state = "demo"; label = "Demo";
@@ -155,7 +191,7 @@
   // ---- feed -------------------------------------------------------------------
   function feedItem(record) {
     var outcome = outcomeOf(record.outcome, { text: "Recorded.", tone: "warn" });
-    var item = make("li", "item " + outcome.tone);
+    var item = make("li", "item");
     var head = make("div", "item-head");
     head.appendChild(make("span", "badge", tierName(record.tier)));
     if (record.fooled) { head.appendChild(make("span", "badge fooled", "agent fooled")); }
@@ -167,8 +203,9 @@
       head.appendChild(time);
     }
     item.appendChild(head);
-    item.appendChild(make("p", "outcome", outcome.text));
     item.appendChild(make("p", "item-msg", record.message || ""));
+    item.appendChild(trail(record.outcome, false));
+    item.appendChild(make("p", "outcome", outcome.text));
     var link = txLink(record.tx_id);
     if (link) { item.appendChild(link); }
     return item;
@@ -182,11 +219,12 @@
   }
 
   // ---- result of one attempt --------------------------------------------------
-  function showResult(kind, title, lines, link) {
+  function showResult(kind, title, lines, link, outcomeKey) {
     var box = $("result");
     clear(box);
     box.className = "result " + kind;
     box.appendChild(make("h3", "", title));
+    if (outcomeKey) { box.appendChild(trail(outcomeKey, true)); }
     lines.forEach(function (line) {
       box.appendChild(make("p", line.detail ? "detail" : "", line.text));
     });
@@ -206,7 +244,7 @@
     if (data.fooled) { lines.push({ text: "The agent was fooled." }); }
     var outcome = outcomeOf(data.outcome, { text: "Recorded." });
     var kind = (data.funds_lost || data.fooled) ? "bad" : "good";
-    showResult(kind, outcome.text, lines, txLink(data.tx_id));
+    showResult(kind, outcome.text, lines, txLink(data.tx_id), data.outcome);
   }
 
   // ---- actions ----------------------------------------------------------------
@@ -219,11 +257,21 @@
     $("send-label").textContent = value ? "Waiting for the agent" : "Send to the agent";
   }
 
+  function showOffline() {
+    $("status-pill").setAttribute("data-state", "offline");
+    $("status-text").textContent = "Not reachable";
+    var banner = $("banner");
+    banner.textContent = "The Arena is not answering. It may be restarting. This page tries again every 15 seconds.";
+    banner.hidden = false;
+    $("send").disabled = true;
+  }
+
   function refresh() {
     return Promise.all([request("/api/stats"), request("/api/feed?limit=20")]).then(function (answers) {
-      if (answers[0].ok) { showStats(answers[0].data); }
+      if (!answers[0].ok) { showOffline(); return; }
+      showStats(answers[0].data);
       if (answers[1].ok) { showFeed(answers[1].data.records || []); }
-    }).catch(function () { /* the next refresh tries again */ });
+    }).catch(showOffline);
   }
 
   function submit(event) {
