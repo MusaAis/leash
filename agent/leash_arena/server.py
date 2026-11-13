@@ -17,7 +17,9 @@ from .limits import client_bucket
 from .tiers import NETWORK
 
 MAX_BODY_BYTES = 2048
-REQUEST_DEADLINE_SECONDS = 15.0  # accept to last body byte; cancelled before the model call
+REQUEST_DEADLINE_SECONDS = 5.0  # accept to the end of the headers
+BODY_DEADLINE_SECONDS = 5.0  # end of the headers to the last body byte; cancelled before the model call
+POST_RESERVE = 8  # connection slots that only GET requests can use
 MAX_PER_CLIENT = 4  # open connections per client address (not applied to the proxy on this machine)
 ORIGIN_PATTERN = re.compile(r"^(https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?|http://(localhost|127\.0\.0\.1)(:[0-9]{1,5})?)$")
 FEED_DEFAULT, FEED_MAX = 20, 50
@@ -99,6 +101,22 @@ def parse_attempt_body(raw: bytes) -> tuple[str, str]:
     return data["tier"], data["message"]
 
 
+def _parse_address(text: str) -> str | None:
+    """An address from one header entry: plain, with a port, or in brackets. None when it is not one."""
+    text = text.strip()
+    if text.startswith("["):
+        end = text.find("]")
+        if end < 0:
+            return None
+        text = text[1:end]
+    elif text.count(":") == 1:  # IPv4 with a port
+        text = text.split(":")[0]
+    try:
+        return str(ipaddress.ip_address(text))
+    except ValueError:
+        return None
+
+
 class ArenaServer(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 32
@@ -108,6 +126,7 @@ class ArenaServer(ThreadingHTTPServer):
                  allowed_origins: frozenset[str] = frozenset(), per_client: int = MAX_PER_CLIENT,
                  exempt_loopback: bool = True, dashboard=None) -> None:
         super().__init__(address, handler)
+        self._posts = threading.BoundedSemaphore(max(1, max_connections - min(POST_RESERVE, max_connections // 2)))
         self.dashboard = dashboard
         self.arena, self.assets, self.proxy_header, self.mode = arena, assets, proxy_header, mode
         self.allowed_origins, self.per_client, self.exempt_loopback = allowed_origins, per_client, exempt_loopback
@@ -155,6 +174,22 @@ class ArenaServer(ThreadingHTTPServer):
                         self._open.pop(key, None)
             self._connections.release()
 
+    def claim_client(self, key: str) -> bool:
+        """Count one open request for a client known only from the proxy header; False when its share is used."""
+        with self._open_lock:
+            if self._open.get(key, 0) >= self.per_client:
+                return False
+            self._open[key] = self._open.get(key, 0) + 1
+            return True
+
+    def release_client(self, key: str) -> None:
+        with self._open_lock:
+            left = self._open.get(key, 0) - 1
+            if left > 0:
+                self._open[key] = left
+            else:
+                self._open.pop(key, None)
+
     def handle_error(self, request, client_address) -> None:
         # The default prints a traceback and the client address. Print the error class only.
         sys.stderr.write(f"request error: {type(sys.exc_info()[1]).__name__}\n")
@@ -179,7 +214,8 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "LeashArena"
     sys_version = ""
     timeout = 10  # one socket read
-    request_deadline = REQUEST_DEADLINE_SECONDS  # the whole request, accept to last body byte
+    request_deadline = REQUEST_DEADLINE_SECONDS  # accept to the end of the headers
+    body_deadline = BODY_DEADLINE_SECONDS  # end of the headers to the last body byte
     server: ArenaServer
 
     def version_string(self) -> str:
@@ -189,14 +225,38 @@ class Handler(BaseHTTPRequestHandler):
         """Requests are not logged: they carry network addresses."""
 
     # -- one deadline for the whole request ----------------------------------------
-    def handle(self) -> None:
-        self._deadline = threading.Timer(self.request_deadline, self._expire)
+    def _arm(self, seconds: float) -> None:
+        timer = getattr(self, "_deadline", None)
+        if timer is not None:
+            timer.cancel()
+        self._deadline = threading.Timer(seconds, self._expire)
         self._deadline.daemon = True
         self._deadline.start()
+
+    def handle(self) -> None:
+        self._claimed: str | None = None
+        self._arm(self.request_deadline)
         try:
             super().handle()
         finally:
             self._deadline.cancel()
+            if self._claimed is not None:
+                self.server.release_client(self._claimed)
+                self._claimed = None
+
+    def parse_request(self) -> bool:
+        if not super().parse_request():
+            return False
+        self._arm(self.body_deadline)  # the headers are in; the body gets its own short time
+        if self.server.proxy_header and self.server._client_key(self.client_address[0]) is None:
+            key = client_bucket(self._client_ip())  # behind the proxy on this machine: count the real visitor
+            if key != client_bucket(self.client_address[0]):
+                if not self.server.claim_client(key):
+                    self.close_connection = True
+                    self._error(429, "busy", {"Retry-After": "5"})
+                    return False
+                self._claimed = key
+        return True
 
     def _expire(self) -> None:
         try:
@@ -259,6 +319,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "bad_request")
         path, _, query = self.path.partition("?")  # no decoding: an encoded path never matches a route
         method = self.command
+        if method != "POST":
+            self._deadline.cancel()  # no body is read; a slow answer (a view call) is not the visitor's fault
         if method == "OPTIONS" and (path in API_GET or path in API_POST) and self._cors_headers():
             allow = "GET, HEAD" if path in API_GET else "POST"
             return self._send(204, b"", "text/plain", {
@@ -306,11 +368,11 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             behind_proxy = False
         if header and behind_proxy:  # the header is read only when the proxy on this machine sent it
-            value = self.headers.get(header, "").split(",")[-1].strip()
-            try:
-                return str(ipaddress.ip_address(value))
-            except ValueError:
-                pass
+            lines = self.headers.get_all(header) or []
+            if lines:  # the last line, the last entry: the one the proxy on this machine appended
+                found = _parse_address(lines[-1].split(",")[-1])
+                if found:
+                    return found
         return peer
 
     def _origin_ok(self) -> bool:
@@ -334,6 +396,7 @@ class Handler(BaseHTTPRequestHandler):
         auth = self.headers.get("Authorization", "")
         if not (auth.startswith("Bearer ") and dash.token_ok(auth[7:].strip())):
             return self._error(401, "unauthorized")
+        self._deadline.cancel()  # the pause runs the near CLI and can take longer than the request deadline
         self._json(200, {"status": "done", **dash.panic()})
 
     def _post_attempt(self) -> None:
@@ -352,6 +415,14 @@ class Handler(BaseHTTPRequestHandler):
         content_type = self.headers.get("Content-Type", "").partition(";")[0].strip().lower()
         if content_type != "application/json":
             return self._error(415, "unsupported_media_type")
+        if not self.server._posts.acquire(blocking=False):  # slots kept free for the page and the feed
+            return self._error(429, "busy", {"Retry-After": "5"})
+        try:  # the slot is held for the whole request, so waiting attempts cannot fill every connection
+            self._read_and_run(length)
+        finally:
+            self.server._posts.release()
+
+    def _read_and_run(self, length: int) -> None:
         raw = self.rfile.read(length)
         self._deadline.cancel()  # the visitor sent everything; the model call may take longer
         if len(raw) != length:
@@ -372,7 +443,7 @@ def make_server(arena: Arena, host: str = "127.0.0.1", port: int = 8080, web_dir
                 proxy_header: str | None = None, mode: str = "live", max_connections: int = 64,
                 io_timeout: float = 10.0, allowed_origins: tuple[str, ...] = (),
                 request_deadline: float = REQUEST_DEADLINE_SECONDS, per_client: int = MAX_PER_CLIENT,
-                exempt_loopback: bool = True, dashboard=None) -> ArenaServer:
+                exempt_loopback: bool = True, dashboard=None, body_deadline: float | None = None) -> ArenaServer:
     """Build the server. The page files are read once here; no other file is ever served."""
     for origin in allowed_origins:
         if not ORIGIN_PATTERN.match(origin):
@@ -380,6 +451,7 @@ def make_server(arena: Arena, host: str = "127.0.0.1", port: int = 8080, web_dir
     folder = Path(web_dir) if web_dir else DEFAULT_WEB_DIR
     served = {**STATIC, **(DASH_STATIC if dashboard is not None else {})}
     assets = {path: ((folder / name).read_bytes(), ctype) for path, (name, ctype) in served.items()}
-    handler = type("ArenaHandler", (Handler,), {"timeout": io_timeout, "request_deadline": request_deadline})
+    handler = type("ArenaHandler", (Handler,), {"timeout": io_timeout, "request_deadline": request_deadline,
+                                                  "body_deadline": request_deadline if body_deadline is None else body_deadline})
     return ArenaServer((host, port), handler, arena, assets, proxy_header, mode, max_connections,
                        frozenset(allowed_origins), per_client, exempt_loopback, dashboard)

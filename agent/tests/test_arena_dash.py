@@ -105,6 +105,50 @@ class ReadTests(unittest.TestCase):
         self.assertGreater(len(seen), count)
 
 
+class RefreshTests(unittest.TestCase):
+    def test_a_slow_refresh_does_not_hold_other_callers(self):
+        import threading
+        import time as _time
+        now, gate, entered = [0.0], threading.Event(), threading.Event()
+        calls = []
+
+        def opener(request, timeout):
+            calls.append(timeout)
+            entered.set()
+            if len(calls) > 6:  # the second round of reads waits for the gate
+                gate.wait(5)
+            return opener_for(GOOD)(request, timeout)
+
+        dash = Dashboard({"fortress": cfg()}, Path("/nonexistent/stop"), None, opener, clock=lambda: now[0])
+        first = dash.snapshot()
+        now[0] = 20.0
+        entered.clear()
+        worker = threading.Thread(target=dash.snapshot)
+        worker.start()
+        self.assertTrue(entered.wait(5))
+        started = _time.time()
+        second = dash.snapshot()  # served from the last state while the refresh is still running
+        self.assertLess(_time.time() - started, 1.0)
+        self.assertEqual(second["tiers"], first["tiers"])
+        gate.set()
+        worker.join(5)
+
+    def test_the_view_call_has_a_five_second_timeout(self):
+        seen = []
+        rpc_view("v.testnet", "get_stats", None, lambda request, timeout: (seen.append(timeout), opener_for({"get_stats": [1, 2]})(request, timeout))[1])
+        self.assertEqual(seen, [5.0])
+
+    def test_wrong_tokens_are_counted_from_many_threads(self):
+        import threading
+        dash = Dashboard({}, Path("/nonexistent/stop"), HASH)
+        threads = [threading.Thread(target=dash.token_ok, args=("x",)) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertTrue(dash.locked())
+
+
 class PanicTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -181,6 +225,18 @@ class DashServerTests(ServerCase):
     def panic(self, token=TOKEN, headers=None):
         head = {"Authorization": f"Bearer {token}", **(headers or {})}
         return self.call("POST", "/api/panic", b"", {**head, "Content-Length": "0"})
+
+    def test_a_slow_pause_is_not_cut_by_the_request_deadline(self):
+        import time as _time
+        self.stop()
+        slow = Dashboard({"fortress": cfg("a")}, self.flag, HASH, opener_for(GOOD), lambda c: _time.sleep(0.8))
+        self.server = make_server(self.arena, "127.0.0.1", 0, dashboard=slow, request_deadline=0.3)
+        self.port = self.server.server_address[1]
+        import threading
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
+        status, _, body = self.panic()
+        self.assertEqual(status, 200)
+        self.assertIn(b'"paused"', body)
 
     def test_the_dashboard_page_and_data_are_served(self):
         for path, kind in (("/dashboard", "text/html"), ("/dash.js", "text/javascript"), ("/dash.css", "text/css")):

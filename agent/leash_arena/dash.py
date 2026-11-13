@@ -22,6 +22,7 @@ from leash_agent.keys import RPC_URLS, rpc_url_ok
 
 NETWORK = "testnet"
 CACHE_SECONDS = 15.0
+RPC_TIMEOUT = 5.0  # one view call
 MAX_FAILURES, FAILURE_WINDOW = 5, 60.0  # wrong tokens per minute before the switch locks
 
 
@@ -41,7 +42,7 @@ def rpc_view(account: str, method: str, args: dict | None = None, opener: Callab
                                   "account_id": account, "method_name": method, "args_base64": encoded}}).encode()
     request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with opener(request, timeout=15) as resp:
+        with opener(request, timeout=RPC_TIMEOUT) as resp:
             data = json.loads(resp.read(1_000_000).decode())
         return json.loads(bytes(data["result"]["result"]).decode())
     except (urllib.error.URLError, OSError, ValueError, KeyError, TypeError) as exc:
@@ -98,25 +99,45 @@ class Dashboard:
                  clock: Callable[[], float] = time.monotonic, ttl: float = CACHE_SECONDS) -> None:
         self.configs, self.flag_path, self.token_sha256 = dict(configs), flag_path, token_sha256
         self.opener, self.pauser, self.clock, self.ttl = opener, pauser, clock, ttl
-        self._lock, self._cached, self._at = threading.Lock(), None, 0.0
+        self._lock, self._cached, self._at, self._refreshing = threading.Lock(), None, 0.0, False
+        self._fail_lock = threading.RLock()
         self._failures: deque[float] = deque()
 
     @property
     def panic_enabled(self) -> bool:
         return bool(self.token_sha256)
 
+    def _read_all(self) -> dict:
+        return {name: vault_snapshot(cfg, self.opener) for name, cfg in self.configs.items()}
+
     def snapshot(self) -> dict:
+        """The cached state. One caller refreshes it outside the lock; the others get the last one meanwhile."""
         with self._lock:
-            if self._cached is None or self.clock() - self._at >= self.ttl:
-                self._cached = {name: vault_snapshot(cfg, self.opener) for name, cfg in self.configs.items()}
-                self._at = self.clock()
-            return {"network": NETWORK, "panic_enabled": self.panic_enabled, "tiers": self._cached}
+            stale = self._cached is None or self.clock() - self._at >= self.ttl
+            mine = stale and not self._refreshing
+            if mine:
+                self._refreshing = True
+            current = self._cached
+        if mine:
+            try:
+                fresh = self._read_all()
+            except Exception:
+                fresh = None
+            with self._lock:
+                self._refreshing = False
+                if fresh is not None:
+                    self._cached, self._at = fresh, self.clock()
+                current = self._cached
+        elif current is None:
+            current = self._read_all()  # nothing to serve yet and another caller is reading: read for this one
+        return {"network": NETWORK, "panic_enabled": self.panic_enabled, "tiers": current}
 
     def locked(self) -> bool:
-        now = self.clock()
-        while self._failures and now - self._failures[0] > FAILURE_WINDOW:
-            self._failures.popleft()
-        return len(self._failures) >= MAX_FAILURES
+        with self._fail_lock:
+            now = self.clock()
+            while self._failures and now - self._failures[0] > FAILURE_WINDOW:
+                self._failures.popleft()
+            return len(self._failures) >= MAX_FAILURES
 
     def token_ok(self, presented: str) -> bool:
         """True for the right token. Wrong tokens are counted; five a minute lock the switch."""
@@ -125,7 +146,8 @@ class Dashboard:
         digest = hashlib.sha256(presented.encode("utf-8", "replace")).hexdigest()
         if hmac.compare_digest(digest, self.token_sha256):
             return True
-        self._failures.append(self.clock())
+        with self._fail_lock:
+            self._failures.append(self.clock())
         return False
 
     def panic(self) -> dict:

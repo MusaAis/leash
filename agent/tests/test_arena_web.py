@@ -87,6 +87,17 @@ class ScriptTests(unittest.TestCase):
                        "XMLHttpRequest", "WebSocket", "import(", "postMessage"):
             self.assertNotIn(banned, JS, banned)
 
+    def test_outcome_lookups_ignore_inherited_keys(self):
+        self.assertIn("hasOwnProperty", JS)
+        self.assertNotRegex(JS, r"OUTCOMES\[[a-z.]+\]\s*\|\|")
+        self.assertEqual(len(re.findall(r"OUTCOMES\[", JS)), 1)  # only the guarded helper indexes it
+        self.assertNotRegex(JS, r"GATES\[[a-zA-Z]+\]\s*\|\|")  # the gate table is read with the same guard
+        self.assertIn("hasOwnProperty.call(GATES", JS)
+
+    def test_the_panic_page_says_to_check_the_status_when_the_answer_drops(self):
+        dash_js = (DEFAULT_WEB_DIR / "dash.js").read_text()
+        self.assertIn("check the status", dash_js)
+
     def test_text_reaches_the_page_through_text_content_only(self):
         self.assertIn(".textContent", JS)
         self.assertNotRegex(JS, r"\.(innerText|html)\s*=")

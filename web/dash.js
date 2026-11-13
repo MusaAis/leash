@@ -19,14 +19,25 @@
   function render(data) {
     tiers.textContent = "";
     Object.keys(data.tiers).forEach(function (name) {
-      var t = data.tiers[name], card = document.createElement("div"), h = document.createElement("h2");
+      var t = data.tiers[name], card = document.createElement("div"), head = document.createElement("div");
+      var h = document.createElement("h2"), state = document.createElement("span");
       var list = document.createElement("dl"), p = t.policy;
-      card.className = "card"; h.textContent = name + " (" + data.network + ")"; card.appendChild(h);
+      var stopped = !!(t.paused_all || (p && p.paused));
+      card.className = "card"; head.className = "card-head";
+      h.textContent = name + " (" + data.network + ")";
+      state.className = "state" + (stopped ? " bad" : ""); state.textContent = stopped ? "Paused" : "Active";
+      head.appendChild(h); head.appendChild(state); card.appendChild(head);
+      var balance = document.createElement("p"), unit = document.createElement("span"), cap = document.createElement("p");
+      balance.className = "balance";
+      balance.textContent = t.available_near === null ? "not readable" : String(t.available_near);
+      unit.className = "unit"; unit.textContent = t.available_near === null ? "" : " NEAR";
+      balance.appendChild(unit);
+      cap.className = "balance-label"; cap.textContent = "Available in the vault";
+      card.appendChild(balance); card.appendChild(cap);
       row(list, "Vault", t.vault);
-      row(list, "Available", t.available_near === null ? null : t.available_near + " NEAR");
       row(list, "Allowed / denied", t.allowed === null ? null : t.allowed + " / " + t.denied);
       row(list, "Paused (all)", t.paused_all, t.paused_all ? "bad" : "ok");
-      row(list, "Agent paused", p ? p.paused : null, p && p.paused ? "bad" : "ok");
+      row(list, "Agent paused", p ? p.paused : null, p ? (p.paused ? "bad" : "ok") : "");
       row(list, "Per transaction", p ? p.per_tx_cap_near + " NEAR" : null);
       row(list, "Daily cap", p ? p.daily_cap_near + " NEAR" : null);
       row(list, "Spent in window", p ? p.spent_in_window_near + " NEAR" : null);
@@ -58,7 +69,7 @@
         else if (x.code === 429) { result.textContent = "Locked for a minute after wrong tokens."; }
         else { result.textContent = "Not done (" + x.code + ")."; }
       })
-      .catch(function () { result.textContent = "The request failed."; })
+      .catch(function () { result.textContent = "No answer arrived. The pause may still have run: check the status below before trying again."; load(); })
       .then(function () { token = ""; pauseButton.disabled = false; });
   });
 

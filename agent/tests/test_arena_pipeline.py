@@ -289,10 +289,10 @@ class BudgetTests(ArenaCase):
         self.assertEqual(result.record["cost_micro_usd"], 1234)
         self.assertEqual(arena.budget.snapshot()["spent_micro_usd"], 1234)
 
-    def test_an_error_before_any_usage_is_not_charged(self):
+    def test_an_error_from_the_call_is_charged_the_held_worst_case(self):
         arena = self.make(error=RuntimeError("HTTP 402"), tokens=0)
         arena.attempt("loose", "a", "hi")
-        self.assertEqual(arena.budget.snapshot()["spent_micro_usd"], 0)
+        self.assertGreaterEqual(arena.budget.snapshot()["spent_micro_usd"], 4000)
         self.assertEqual(arena.budget._held, 0)
 
     def test_a_brain_that_reports_no_usage_is_charged_the_worst_case(self):
@@ -305,6 +305,33 @@ class BudgetTests(ArenaCase):
         arena.brain_factory = QuietBrain
         result = arena.attempt("loose", "a", "hi")
         self.assertGreaterEqual(result.record["tokens"], 4000)
+
+    def test_a_sent_request_that_fails_with_unknown_usage_is_charged_the_worst_case(self):
+        arena = self.make()
+
+        class QuietBrain:
+            def decide(self, task):
+                raise RuntimeError("the connection dropped")
+
+        arena.brain_factory = QuietBrain
+        result = arena.attempt("loose", "a", "hi")
+        self.assertEqual(result.record["outcome"], "model_error")
+        self.assertGreaterEqual(result.record["tokens"], 4000)
+        self.assertEqual(arena.budget._held, 0)
+
+    def test_a_real_shaped_brain_that_raises_is_charged_the_worst_case(self):
+        arena = self.make()
+
+        class RealShapedBrain:
+            tokens_used = 0  # like the real brain: the counter starts at 0 and moves only after an answer
+
+            def decide(self, task):
+                raise TimeoutError("read timed out")
+
+        arena.brain_factory = RealShapedBrain
+        result = arena.attempt("loose", "a", "hi")
+        self.assertEqual(result.record["outcome"], "model_error")
+        self.assertGreaterEqual(result.record["tokens"], 4000)  # the held worst case, not the counter's 0
 
     def test_a_damaged_budget_file_means_replay(self):
         (self.base / "budget.json").write_text("{broken")
