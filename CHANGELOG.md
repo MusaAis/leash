@@ -3,6 +3,8 @@
 All notable changes are listed here. Versions follow semantic versioning.
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-11-14
 ### Added
 - `docs/api.md` lists the contract methods, events and denial reasons; the docs checks read it.
 - `docs/tracks.md` states what Bylaw does for each submitted track: security, agents and DeFi.
