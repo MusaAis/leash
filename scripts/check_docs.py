@@ -192,9 +192,15 @@ def contract_methods(source: str) -> list[str]:
     return re.findall(r"^\s*pub fn (\w+)\(", part[part.index("pub fn new("):], re.M)
 
 
+def first_cells(doc: str) -> str:
+    """First column of every table row, so prose cannot satisfy a table check."""
+    return "\n".join(ln.split("|")[1] for ln in doc.splitlines() if ln.startswith("|") and ln.count("|") >= 3)
+
+
 def interface_gaps(source: str, readme: str, skip: tuple[str, ...] | list[str] = ()) -> list[str]:
     names = [n for n in contract_methods(source) if n not in skip]
-    return [f"docs/api.md has no entry for the contract method `{n}`" for n in names if not re.search(r"`%s[`(]" % n, readme)]
+    cells = first_cells(readme)
+    return [f"docs/api.md has no entry for the contract method `{n}`" for n in names if not re.search(r"`%s[`(]" % n, cells)]
 
 
 def unreleased_problems(source: str, docs: dict[str, str], listed: list[str], until: str, tags: set[str]) -> list[str]:
@@ -212,8 +218,8 @@ def unreleased_problems(source: str, docs: dict[str, str], listed: list[str], un
 
 def event_gaps(source: str, readme: str) -> list[str]:
     events = sorted(set(re.findall(r'emit\(\s*"([a-z_]+)"', contract_part(source))))
-    line = next((ln for ln in readme.splitlines() if ln.startswith("Events:")), "")
-    return [f"docs/api.md event list has no `{e}`" for e in events if f"`{e}`" not in line]
+    cells = first_cells(readme)
+    return [f"docs/api.md event table has no `{e}`" for e in events if f"`{e}`" not in cells]
 
 
 def badge_problems(readme: str, has_mainnet_proof: bool) -> list[str]:

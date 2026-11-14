@@ -5,7 +5,7 @@ All notable changes are listed here. Versions follow semantic versioning.
 ## [Unreleased]
 ### Added
 - `docs/api.md` lists the contract methods, events and denial reasons; the docs checks read it.
-- `docs/tracks.md` states what Bylaw does for each submitted track.
+- `docs/tracks.md` states what Bylaw does for each submitted track: security, agents and DeFi.
 
 ### Changed
 - The README is shorter, with a table of where NEAR is used and a no-wallet demo step.

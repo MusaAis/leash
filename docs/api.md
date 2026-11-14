@@ -1,6 +1,6 @@
 # Contract API
 
-The vault contract's methods, events and denial reasons. Every method name below is checked against the contract source by `make check-docs`.
+The vault contract's methods, events and denial reasons. Method names, event names and denial reasons are checked against the contract source by `make check-docs`. Field lists and notes are not machine-checked.
 
 ## Methods
 
@@ -43,8 +43,6 @@ Each event is logged as `EVENT_JSON:` followed by `{"standard":"leash","version"
 | `unwrapped` | `amount` |
 
 Amounts are in yoctoNEAR, as strings.
-
-Events: `funded`, `withdrawn`, `policy_set`, `agent_removed`, `agent_paused`, `agent_resumed`, `paused_all`, `resumed_all`, `spend_allowed`, `spend_denied`, `intents_configured`, `routes_set`, `intent_approved`, `intent_sent`, `intent_denied`, `unwrapped`.
 
 ## Denial reasons
 
