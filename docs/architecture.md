@@ -1,6 +1,6 @@
 # Architecture
 
-LEASH separates the ability to decide from the ability to pay. The agent decides. The vault contract pays, and only inside the owner's policy.
+Bylaw separates the ability to decide from the ability to pay. The agent decides. The vault contract pays, and only inside the owner's policy.
 
 <p align="center">
   <img src="img/architecture.svg" alt="The owner funds the vault and sets policy. The agent asks the vault to spend. The vault pays the payee if the policy allows it, and otherwise records a denial event." width="440">

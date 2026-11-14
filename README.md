@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/leash-wordmark.svg" alt="LEASH: Give AI money. Keep the leash." width="480">
+  <img src="docs/assets/leash-wordmark.svg" alt="Bylaw: Give AI money. Keep the rules." width="480">
 </p>
 
 <p align="center">
@@ -13,15 +13,17 @@
   <img src="https://img.shields.io/badge/near--sdk-%3D5.28.3-blue" alt="near-sdk">
 </p>
 
-LEASH is an on-chain spending-control layer for AI agents on NEAR. The funds sit in a vault contract, and an agent can only ask the vault to pay. The vault enforces the owner's limits on-chain, so an agent that is tricked, buggy or hijacked cannot move money outside its policy. Built for NEAR HACKATHON.
+Bylaw is an on-chain spending-control layer for AI agents on NEAR. The funds sit in a vault contract, and an agent can only ask the vault to pay. The vault enforces the owner's limits on-chain, so an agent that is tricked, buggy or hijacked cannot move money outside its policy. Built for NEAR HACKATHON.
 
-[Why it matters](#why-it-matters) · [How it works](#how-it-works) · [Verified results](#verified-results) · [Quick start](#quick-start) · [Agent runtime](#agent-runtime-and-attack-suite) · [NEAR usage](#how-leash-uses-near) · [Documentation](#documentation)
+Bylaw was developed under the working name `leash`. The repository path, the contract event standard, the accounts and the environment variables keep that name.
+
+[Why it matters](#why-it-matters) · [How it works](#how-it-works) · [Verified results](#verified-results) · [Quick start](#quick-start) · [Agent runtime](#agent-runtime-and-attack-suite) · [NEAR usage](#how-bylaw-uses-near) · [Documentation](#documentation)
 
 **Live:** [Landing page](https://leash-landing-tau.vercel.app/) · [Arena](https://leash-arena.taila4b466.ts.net:8443/) · [Mainnet proof](docs/mainnet-proof.md) · [Testnet proof](docs/testnet-proof.md)
 
 ## Why it matters
 
-Giving an AI agent a key means trusting it with everything that key controls. If the agent is tricked by prompt injection, buggy or compromised, the funds are gone. Guardrails inside the agent's own process do not help, because a compromised agent bypasses them. LEASH moves the guardrail out of the agent and into a contract the agent cannot change.
+Giving an AI agent a key means trusting it with everything that key controls. If the agent is tricked by prompt injection, buggy or compromised, the funds are gone. Guardrails inside the agent's own process do not help, because a compromised agent bypasses them. Bylaw moves the guardrail out of the agent and into a contract the agent cannot change.
 
 ## How it works
 
@@ -113,9 +115,9 @@ make attack-llm-testnet SAMPLES=3  # ask the model three times per attack (with 
 
 Before it sends anything, the suite checks the vault (policy, pauses, allowlist, room under the caps, balance) and stops with exit code 3 if a run would prove nothing. The report lists every attempt with its outcome and ends with totals, including `agent fooled` (the model decided to pay what it should not) and `funds lost` (money that really left the vault without authorization). The command exits with code 2 if a payment left the vault without authorization. Live runs are capped per run and per day (`NEAR_AI_MAX_TOKENS`, `LEASH_MAX_MODEL_CALLS`, `LEASH_MAX_TOTAL_TOKENS`, `LEASH_MAX_DAILY_CALLS`, `LEASH_MAX_DAILY_TOKENS`), so a mistake cannot spend the credits. Details: [agent runtime](docs/agent.md).
 
-## How LEASH uses NEAR
+## How Bylaw uses NEAR
 
-| NEAR feature | Use in LEASH | State |
+| NEAR feature | Use in Bylaw | State |
 |---|---|---|
 | Smart contract (Rust, near-sdk 5) | The vault: custody, policy engine, event log | Implemented; deployed on testnet and mainnet |
 | Separate accounts | Vault, owner, agent and payee are different accounts, so the agent never holds the funds | Implemented |

@@ -6,6 +6,7 @@ All notable changes are listed here. Versions follow semantic versioning.
 ### Changed
 - The README links the landing page, the Arena and both proof pages.
 - The mainnet proof page lists the spend, denial and kill-switch transactions of the current vault and its decision chain check.
+- The project is called Bylaw in the README, the landing page, the Arena and the dashboard. The second Arena tier is called Loose rules. Repository path, accounts, contract event standard and environment variables are unchanged.
 
 ## [0.4.2] - 2026-11-13
 ### Changed

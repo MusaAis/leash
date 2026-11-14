@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 560" width="440" height="560" role="img" aria-labelledby="t d">
-<title id="t">LEASH architecture</title>
+<title id="t">Bylaw architecture</title>
 <desc id="d">The owner funds the vault and sets policy. The agent asks the vault to spend. The vault pays the payee if the policy allows, otherwise it records a denial event.</desc>
 <defs>
 <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#24292f"/></marker>
@@ -22,7 +22,7 @@
 <text x="348" y="146" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">spend(to, amount,</text>
 <text x="348" y="162" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">memo)</text>
 <rect x="20" y="210" width="400" height="176" rx="10" fill="#f6f8fa" stroke="#24292f" stroke-width="2"/>
-<text x="220" y="240" font-size="15" fill="#24292f" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">LEASH vault contract (NEAR)</text>
+<text x="220" y="240" font-size="15" fill="#24292f" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Bylaw vault contract (NEAR)</text>
 <text x="40" y="268" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Holds the funds. The agent never does.</text>
 <text x="40" y="290" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Policy per agent: per-transaction cap, daily cap,</text>
 <text x="40" y="308" font-size="12.5" fill="#24292f" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">destination allowlist, pause flag</text>
