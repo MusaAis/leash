@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/network-NEAR%20mainnet%20and%20testnet-informational" alt="Network">
   <img src="https://img.shields.io/github/v/release/MusaAis/leash" alt="release">
   <img src="https://img.shields.io/badge/contract%20tests-148%20passed-brightgreen" alt="Contract tests">
-  <img src="https://img.shields.io/badge/agent%20tests-767%20passed-brightgreen" alt="Agent tests">
+  <img src="https://img.shields.io/badge/agent%20tests-768%20passed-brightgreen" alt="Agent tests">
   <img src="https://img.shields.io/badge/Rust-1.96.0-orange" alt="Rust">
   <img src="https://img.shields.io/badge/near--sdk-%3D5.28.3-blue" alt="near-sdk">
 </p>
@@ -50,12 +50,12 @@ Giving an agent a key means trusting it with everything the key controls. Guardr
 
 | Check | Result |
 |---|---|
-| Real swap through the vault on mainnet | 1Click returned status SUCCESS, 0.37853 USDC delivered on Base |
-| Current mainnet vault | Allowed and denied `spend`, pause and resume, `chain OK` over the decision events |
-| Scripted testnet demo | 12 checks passed, 0 failed |
-| Hijacked agent, 14 requests straight to the vault | 11 blocked, 3 paid to the allowed payee inside the caps, 0 paid to anyone else |
-| Live model, 10 attack texts, 3 samples each | Agent fooled 0, funds lost 0 |
-| Tests | 148 contract and 767 agent tests pass |
+| Real swap through the vault on mainnet (contract 0.2.0) | 1Click returned status SUCCESS, 0.37853 USDC delivered on Base |
+| Current mainnet vault (NEAR mainnet, contract 0.3.0) | Allowed and denied `spend`, pause and resume, `chain OK` over the decision events |
+| Scripted testnet demo (NEAR testnet, contract 0.1.2) | 12 checks passed, 0 failed |
+| Hijacked agent, 14 requests straight to the vault (NEAR testnet, contract 0.1.2) | 11 blocked, 3 paid to the allowed payee inside the caps, 0 paid to anyone else |
+| Live model, 10 attack texts, 3 samples each (NEAR testnet, contract 0.1.2) | Agent fooled 0, funds lost 0 |
+| Tests | 148 contract and 768 agent tests pass |
 | Build | Rust 1.96.0 and near-sdk =5.28.3; wasm hashes in [docs/build.md](docs/build.md) |
 
 The vault, not the model, is the security boundary. Run counts and links: [testnet proof](docs/testnet-proof.md).
@@ -66,7 +66,7 @@ Needs Python 3.12 and `make`. The tests also need Rust 1.96.0 with the `wasm32-u
 
 1. No wallet, no keys: `cd agent && python3 -m leash_arena --demo`. See the Arena page served on this machine with a scripted agent.
 2. `make test` ends with `test result: ok. 148 passed`.
-3. `make test-agent` prints `Ran 767 tests` and then `OK`.
+3. `make test-agent` prints `Ran 768 tests` and then `OK`.
 4. Testnet demo (needs [cargo-near](https://github.com/near/cargo-near), [near-cli-rs](https://github.com/near/near-cli-rs) and network): `export LEASH_PREFIX=myleash`, then `make accounts-testnet deploy-testnet demo-testnet`. See `Result: N passed, 0 failed`. Details: [deployment guide](docs/deployment.md).
 
 ## Security

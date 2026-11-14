@@ -1,6 +1,6 @@
 # Track fit
 
-Bylaw is submitted to four tracks. Each section says what Bylaw does for the track, where to find it, and one step to see it.
+Bylaw is submitted to three tracks. Each section says what Bylaw does for the track, where to find it, and one step to see it.
 
 ## AI Security & Defense
 
@@ -8,7 +8,7 @@ Bylaw gives an agent money without giving it the keys. The vault enforces a per-
 
 - Code: `contract/src/lib.rs`, `agent/leash_agent/keys.py`, `agent/leash_agent/panic.py`
 - Evidence: [mainnet proof](mainnet-proof.md), [Arena](arena.md)
-- Do: `cd agent && python3 -m leash_arena --demo`, then send an injected message to the Fortress tier. See the vault refuse every destination except the payee.
+- Do: open the live [Arena](arena.md), choose Fortress and send an injected message. See the agent refuse it or the vault deny the payment. The local `python3 -m leash_arena --demo` is a scripted stand-in with a fake vault, not the live vaults; recorded blocks are in the [testnet proof](testnet-proof.md).
 
 ## Agent Economy
 
@@ -16,7 +16,7 @@ An agent pays through the vault with its own account, which holds only gas money
 
 - Code: `agent/leash_agent/agent.py`, `agent/leash_agent/swap.py`, `agent/leash_agent/guardian.py`
 - Evidence: one real swap of 0.1 NEAR to USDC on Base, in the [mainnet proof](mainnet-proof.md)
-- Do: `make test-agent`. See `Ran` followed by the test count and `OK`.
+- Do: open the [mainnet proof](mainnet-proof.md) and follow the `spend_intent` transaction. See `intent_sent` and the four-action receipt to `wrap.near`.
 
 ## Unstoppable DeFi
 
@@ -25,11 +25,3 @@ Bylaw settles across chains through NEAR Intents. The guardian checks each 1Clic
 - Code: `agent/leash_agent/intents.py`, `contract/src/lib.rs` (`spend_intent`)
 - Evidence: [NEAR Intents quotes](intents.md), [mainnet proof](mainnet-proof.md)
 - Do: open the mainnet proof and follow the swap transactions. See 1Click status SUCCESS.
-
-## Autonomous Business
-
-The vault acts as a treasury whose limits a human sets and a contract enforces. Cross-chain payments run through NEAR Intents. Bylaw does not include sales, procurement or revenue-sharing logic.
-
-- Code: `contract/src/lib.rs`
-- Evidence: [architecture](architecture.md)
-- Do: `make test`. See `test result: ok` with the contract test count.

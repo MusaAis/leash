@@ -41,21 +41,28 @@ class DocsChecks(unittest.TestCase):
             self.assertEqual(cd.private_shapes("d.md", good), [], good)
 
     def test_interface_needs_the_exact_name(self):
-        self.assertEqual(cd.interface_gaps(SOURCE, "`new(a)` `spend(x)` `spend_intent(y)`"), [])
-        self.assertEqual(len(cd.interface_gaps(SOURCE, "`new(a)` `spend_intent(y)`")), 1)
-        self.assertEqual(len(cd.interface_gaps(SOURCE, "`new(a)` `spend(x)` `spend_intents`")), 1)
+        self.assertEqual(cd.interface_gaps(SOURCE, "| `new(a)` | x |\n| `spend(x)` | x |\n| `spend_intent(y)` | x |"), [])
+        self.assertEqual(len(cd.interface_gaps(SOURCE, "| `new(a)` | x |\n| `spend_intent(y)` | x |")), 1)
+        self.assertEqual(len(cd.interface_gaps(SOURCE, "| `new(a)` | x |\n| `spend(x)` | x |\n| `spend_intents` | x |")), 1)
 
     def test_event_list(self):
-        self.assertEqual(cd.event_gaps(SOURCE, "Events: `spend_allowed`, `spend_denied`."), [])
-        self.assertEqual(cd.event_gaps(SOURCE, "Events: `spend_allowed`."), ["docs/api.md event list has no `spend_denied`"])
-        self.assertEqual(len(cd.event_gaps(SOURCE, "no events line")), 2)
+        good = "| `spend_allowed` | a |\n| `spend_denied` | b |"
+        self.assertEqual(cd.event_gaps(SOURCE, good), [])
+        self.assertEqual(cd.event_gaps(SOURCE, "| `spend_allowed` | a |"), ["docs/api.md event table has no `spend_denied`"])
+        self.assertEqual(len(cd.event_gaps(SOURCE, "no events table")), 2)
+
+    def test_prose_does_not_satisfy_the_tables(self):
+        self.assertEqual(len(cd.event_gaps(SOURCE, "Events: `spend_allowed`, `spend_denied`.")), 2)
+        self.assertEqual(len(cd.event_gaps(SOURCE, "| `x` | `spend_allowed` `spend_denied` |")), 2)
+        self.assertTrue(cd.interface_gaps(SOURCE, "`new(a)` `spend(x)` `spend_intent(y)`"))
+        self.assertTrue(cd.interface_gaps(SOURCE, "| `new(a)` | `spend(x)` `spend_intent(y)` |"))
 
     def test_readme_length(self):
         self.assertEqual(cd.readme_length_problems("word " * 1000), [])
         self.assertEqual(len(cd.readme_length_problems("word " * 1001)), 1)
 
     def test_api_page_is_the_target(self):
-        self.assertEqual(cd.interface_gaps(SOURCE, "`new(a)` `spend(x)` `spend_intent(y)`"), [])
+        self.assertEqual(cd.interface_gaps(SOURCE, "| `new(a)` | x |\n| `spend(x)` | x |\n| `spend_intent(y)` | x |"), [])
         self.assertTrue(cd.interface_gaps(SOURCE, "README only"))
 
     def test_badge(self):
@@ -118,7 +125,7 @@ class DocsChecks(unittest.TestCase):
         self.assertEqual(len(cd.denial_problems("pub fn spend() {}\n", "Denial reasons: \n")), 1)
 
     def test_interface_skips_only_the_listed_names(self):
-        readme = "`new(a)` `spend(x)` `spend_intent(y)`"
+        readme = "| `new(a)` | x |\n| `spend(x)` | x |\n| `spend_intent(y)` | x |"
         self.assertEqual(cd.interface_gaps(VIEWS, readme, ["would_spend"]), [])
         self.assertEqual(len(cd.interface_gaps(VIEWS, readme)), 1)
 
