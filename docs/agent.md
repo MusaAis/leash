@@ -160,7 +160,7 @@ What this does and does not show. It is one model, ten attack texts and two live
 
 ## Model
 
-The default model is `z-ai/glm-5.3-flash` (`NEAR_AI_MODEL`). It is a canonical name, not an alias, and the gateway reports signature kind `provider_tee` for it (see the signature test below). LEASH records the signature kind and checks that the signed text matches the request and response hashes; it does not verify the signature. `make agent-signature MODELS="a b"` tests other models.
+The default model is `z-ai/glm-5.3-flash` (`NEAR_AI_MODEL`). It is a canonical name, not an alias, and the gateway reports signature kind `provider_tee` for it (see the signature test below). Bylaw records the signature kind and checks that the signed text matches the request and response hashes; it does not verify the signature. `make agent-signature MODELS="a b"` tests other models.
 
 ## Signature test
 
@@ -172,5 +172,5 @@ The default model is `z-ai/glm-5.3-flash` (`NEAR_AI_MODEL`). It is a canonical n
 
 - `zai-org/GLM-5.1-FP8`: refused with HTTP 400. With `x-no-aliasing` set, the gateway says this name is an alias of `z-ai/glm-5.3-flash` and asks for the canonical name. An alias can move, so results for the requested id cannot be reproduced; which model answered the earlier runs is not recorded.
 - `z-ai/glm-5.3`: signature kind `gateway`, signer `0xb98a789cdc4817275f5155593ba73ef2a957e779` (ecdsa), and the signed text matched the request and response hashes computed from the exchange. A `gateway` signature binds the answer to the gateway, not to a model TEE, so this project does not call this model's answers TEE-attested.
-- `z-ai/glm-5.3-flash`: not aliased; the gateway returned signature kind `provider_tee`, signer `0x3b753b4406613c5e70ae640508632b600424fa0c` (ecdsa), and the signed text matched the request and response hashes computed from the exchange. The kind is what the gateway returns. The signature and any attestation are not verified, so LEASH makes no TEE claim.
+- `z-ai/glm-5.3-flash`: not aliased; the gateway returned signature kind `provider_tee`, signer `0x3b753b4406613c5e70ae640508632b600424fa0c` (ecdsa), and the signed text matched the request and response hashes computed from the exchange. The kind is what the gateway returns. The signature and any attestation are not verified, so Bylaw makes no TEE claim.
 - `Qwen/Qwen3.6-35B-A3B-FP8` (signer `0xfdbd7952498b333206f360d71d97a1e0961e8ddf`), `deepseek-ai/DeepSeek-V4.1-Flash-1017` (signer `0xfe0071895500a9755c18044948ab4f4e1a7f337e`) and `Qwen/Qwen3.8-27B` (signer `0x835ab53d20294ef795906dff21ae4c045336aa26`): each not aliased, kind `provider_tee` as returned by the gateway, and the signed text matched our hashes. Same limit: not verified.

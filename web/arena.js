@@ -54,7 +54,7 @@
     while (node.firstChild) { node.removeChild(node.firstChild); }
   }
 
-  function tierName(tier) { return tier === "loose" ? "Loose leash" : "Fortress"; }
+  function tierName(tier) { return tier === "loose" ? "Loose rules" : "Fortress"; }
 
   function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
 

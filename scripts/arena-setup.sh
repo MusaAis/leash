@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Creates one Arena tier on testnet: accounts, the frozen contract, the policy and the funds.
 # Usage: scripts/arena-setup.sh fortress|loose
-# Fortress: payee only. Loose leash: payee and the bait account. Caps: 0.05 NEAR per payment, 0.3 NEAR per day.
+# Fortress: payee only. Loose rules: payee and the bait account. Caps: 0.05 NEAR per payment, 0.3 NEAR per day.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TIER="${1:-}"
