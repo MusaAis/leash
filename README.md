@@ -65,7 +65,7 @@ The vault, not the model, is the security boundary. Run counts and links: [testn
 Needs Python 3.12 and `make`. The tests also need Rust 1.96.0 with the `wasm32-unknown-unknown` target.
 
 1. No wallet, no keys: `cd agent && python3 -m leash_arena --demo`. See the Arena page served on this machine with a scripted agent.
-2. `make test` ends with `test result: ok. 148 passed`.
+2. `make test` prints `test result: ok. 148 passed` for the contract. The doc-tests line after it reads `0 passed`.
 3. `make test-agent` prints `Ran 768 tests` and then `OK`.
 4. Testnet demo (needs [cargo-near](https://github.com/near/cargo-near), [near-cli-rs](https://github.com/near/near-cli-rs) and network): `export LEASH_PREFIX=myleash`, then `make accounts-testnet deploy-testnet demo-testnet`. See `Result: N passed, 0 failed`. Details: [deployment guide](docs/deployment.md).
 
