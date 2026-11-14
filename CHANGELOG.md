@@ -3,7 +3,12 @@
 All notable changes are listed here. Versions follow semantic versioning.
 
 ## [Unreleased]
+### Added
+- `docs/api.md` lists the contract methods, events and denial reasons; the docs checks read it.
+- `docs/tracks.md` states what Bylaw does for each submitted track.
+
 ### Changed
+- The README is shorter, with a table of where NEAR is used and a no-wallet demo step.
 - The README links the landing page, the Arena and both proof pages.
 - The mainnet proof page lists the spend, denial and kill-switch transactions of the current vault and its decision chain check.
 - The project is called Bylaw in the README, the landing page, the Arena and the dashboard. The second Arena tier is called Loose rules. Repository path, accounts, contract event standard and environment variables are unchanged.

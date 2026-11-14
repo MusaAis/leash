@@ -103,12 +103,12 @@ def denial_problems(source: str, readme: str) -> list[str]:
     line = re.search(r"Denial reasons: ([^\n]+)", readme)
     in_doc = set(re.findall(r"`([a-z_]+)`", line.group(1))) if line else set()
     if in_doc != in_code:
-        return [f"README lists {sorted(in_doc)}, the contract has {sorted(in_code)}"]
+        return [f"docs/api.md lists {sorted(in_doc)}, the contract has {sorted(in_code)}"]
     return []
 
 
 def check_denial_reasons() -> list[str]:
-    return denial_problems(text("contract/src/lib.rs"), text("README.md"))
+    return denial_problems(text("contract/src/lib.rs"), text("docs/api.md"))
 
 
 def check_attack_count() -> list[str]:
@@ -194,7 +194,7 @@ def contract_methods(source: str) -> list[str]:
 
 def interface_gaps(source: str, readme: str, skip: tuple[str, ...] | list[str] = ()) -> list[str]:
     names = [n for n in contract_methods(source) if n not in skip]
-    return [f"README has no entry for the contract method `{n}`" for n in names if not re.search(r"`%s[`(]" % n, readme)]
+    return [f"docs/api.md has no entry for the contract method `{n}`" for n in names if not re.search(r"`%s[`(]" % n, readme)]
 
 
 def unreleased_problems(source: str, docs: dict[str, str], listed: list[str], until: str, tags: set[str]) -> list[str]:
@@ -213,7 +213,7 @@ def unreleased_problems(source: str, docs: dict[str, str], listed: list[str], un
 def event_gaps(source: str, readme: str) -> list[str]:
     events = sorted(set(re.findall(r'emit\(\s*"([a-z_]+)"', contract_part(source))))
     line = next((ln for ln in readme.splitlines() if ln.startswith("Events:")), "")
-    return [f"README event list has no `{e}`" for e in events if f"`{e}`" not in line]
+    return [f"docs/api.md event list has no `{e}`" for e in events if f"`{e}`" not in line]
 
 
 def badge_problems(readme: str, has_mainnet_proof: bool) -> list[str]:
@@ -312,7 +312,7 @@ def check_private() -> list[str]:
 
 
 def check_interface() -> list[str]:
-    return interface_gaps(text("contract/src/lib.rs"), text("README.md"), UNRELEASED_METHODS)
+    return interface_gaps(text("contract/src/lib.rs"), text("docs/api.md"), UNRELEASED_METHODS)
 
 
 def check_unreleased() -> list[str]:
@@ -322,7 +322,7 @@ def check_unreleased() -> list[str]:
 
 
 def check_events() -> list[str]:
-    return event_gaps(text("contract/src/lib.rs"), text("README.md"))
+    return event_gaps(text("contract/src/lib.rs"), text("docs/api.md"))
 
 
 def check_badge() -> list[str]:
@@ -371,6 +371,18 @@ def contract_version_problems(pages: dict[str, str], cargo_toml: str) -> list[st
 def check_contract_version() -> list[str]:
     return contract_version_problems({n: text(n) for n in CONTRACT_VERSION_PAGES}, text("contract/Cargo.toml"))
 
+
+
+README_WORD_LIMIT = 1000
+
+
+def readme_length_problems(readme: str, limit: int = README_WORD_LIMIT) -> list[str]:
+    words = len(readme.split())
+    return [f"README has {words} words, the limit is {limit}"] if words > limit else []
+
+
+def check_readme_length() -> list[str]:
+    return readme_length_problems(text("README.md"))
 
 
 def check_readme_pin() -> list[str]:
@@ -438,20 +450,21 @@ def check_changelog_dates() -> list[str]:
 CHECKS = [
     ("STATE.md and CHANGELOG.md match the git tags", check_versions),
     ("test counts in the docs match the code", check_test_counts),
-    ("denial reasons in the README match the contract", check_denial_reasons),
+    ("denial reasons in docs/api.md match the contract", check_denial_reasons),
     ("attack count in the docs matches the suite", check_attack_count),
     ("cost-limit defaults in the docs match the code", check_limits),
     ("every `make` target in the docs exists", check_make_targets),
     ("relative links in the docs resolve", check_links),
     ("no stale status phrases in the docs", check_stale),
     ("no private process terms in the docs", check_private),
-    ("README lists every contract method", check_interface),
+    ("docs/api.md lists every contract method", check_interface),
     ("unreleased methods stay out of the docs until their tag", check_unreleased),
-    ("README lists every contract event", check_events),
+    ("docs/api.md lists every contract event", check_events),
     ("no dates in prose outside proof pages", check_snapshot),
     ("README network badge matches the proofs", check_badge),
     ("near-sdk pin is stated in docs/build.md", check_pin),
     ("README pinned build inputs match the toolchain files", check_readme_pin),
+    ("README stays within the word limit", check_readme_length),
     ("guide pages name the current contract version", check_contract_version),
     ("artifact hashes in docs/build.md match the mainnet proof", check_wasm_facts),
     ("heading anchors in links exist", check_anchors),

@@ -68,25 +68,7 @@ The mainnet run of this path is in the [mainnet proof](mainnet-proof.md).
 
 ## Events
 
-Each event is logged as `EVENT_JSON:` followed by `{"standard":"leash","version":...,"event":...,"data":[...]}`.
-
-| Event | Data fields |
-|---|---|
-| `funded` | `from`, `amount` |
-| `withdrawn` | `amount` |
-| `policy_set` | `agent`, `per_tx_cap`, `daily_cap` |
-| `agent_removed`, `agent_paused`, `agent_resumed` | `agent` |
-| `paused_all`, `resumed_all` | none |
-| `spend_allowed` | `agent`, `to`, `amount`, `memo` |
-| `spend_denied` | `agent`, `to`, `amount`, `reason`, `memo` |
-| `intents_configured` | `wnear`, `guardian`, `epoch` |
-| `routes_set` | `agent`, `count` |
-| `intent_approved` | `agent`, `route_id`, `deposit_account`, `amount`, `expires_ns`, `quote_hash` |
-| `intent_sent` | `agent`, `route_id`, `deposit_account`, `amount`, `quote_hash` |
-| `intent_denied` | `agent`, `route_id`, `deposit_account`, `amount`, `reason` |
-| `unwrapped` | `amount` |
-
-Amounts are in yoctoNEAR, as strings.
+Every decision is logged as an `EVENT_JSON:` line with standard `leash`. The event names, fields and denial reasons are listed in the [contract API](api.md).
 
 ## Decision log and views
 
@@ -96,4 +78,4 @@ Every allowed and denied `spend` and `spend_intent` writes its event through one
 
 ## Related documents
 
-[Security model](security.md) · [NEAR Intents quotes](intents.md) · [Agent runtime](agent.md) · [Deployment guide](deployment.md) · [Architecture decisions](adr)
+[Contract API](api.md) · [Security model](security.md) · [NEAR Intents quotes](intents.md) · [Agent runtime](agent.md) · [Deployment guide](deployment.md) · [Architecture decisions](adr)
