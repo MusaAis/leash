@@ -22,6 +22,31 @@ Two vaults have run on NEAR mainnet. The current vault is `leash2-vault.near`. T
 
 The deployed code is the release artifact of `v0.3.2`: its SHA-256 is `18f112959fc2a6ec4a83489803589c83872c43564e96cd94ac70df1f1113dff0` (see [build](build.md)). `vault-has-code.sh` compares the code hash on chain, `2gMzTHTr2TwtwAaHsXZbKH9nBLi2ZfU9HLMVHG82B8KZ` in base58, with that file.
 
+### Spend, denial and kill-switch proofs
+
+The agent signs each `spend` with its function-call key. The owner signs `pause_all` and `resume_all`. The vault returns `true` for an allowed call and `false` with a reason for a denied one; the reason is in the event on the transaction page.
+
+| Step | Result | Transaction |
+|---|---|---|
+| `spend` of 0.01 NEAR to the allowlisted owner | `spend_allowed` | [CKSMpu…rPU3P](https://explorer.near.org/transactions/CKSMpudnDdBsEosqZgMNJpt99SJ3tdA9GK287NMrPU3P) |
+| `spend` to an account that is not allowlisted | `spend_denied`, `not_allowlisted` | [J3zupz…TXN3o](https://explorer.near.org/transactions/J3zupzmFKKmbBdT7fF7DxV9SxzPE26geE3RSZobTXN3o) |
+| `spend` of 0.2 NEAR, above the per-transaction cap | `spend_denied`, `over_per_tx_cap` | [Aw6vsx…sAwV1](https://explorer.near.org/transactions/Aw6vsxFgjGHo5EXLkUCGxhCVJxSkka9QDPUNvt8sAwV1) |
+| Owner `pause_all` | `paused_all` | [8SVuyQ…ASz22](https://explorer.near.org/transactions/8SVuyQ2rNatPHy1MTSztLufreWrg1pJxMC6wCQBASz22) |
+| `spend` of 0.01 NEAR while paused | `spend_denied`, `all_paused` | [4z6Cns…HJPeB](https://explorer.near.org/transactions/4z6CnsyPrc77muv8wWYCq6NNrD9GcbSrb9n8rjsHJPeB) |
+| Owner `resume_all` | `resumed_all` | [2KcPfH…a2z5q](https://explorer.near.org/transactions/2KcPfHrvEpGuLzGNZavLNXmcwa82qF3wRvS2UsZa2z5q) |
+| `spend` of 0.01 NEAR after resume | `spend_allowed` | [5jfTue…W2JQb](https://explorer.near.org/transactions/5jfTueRwocR2T1ZhgV4gHxeAoDqCVXoHGYnd5sgW2JQb) |
+
+### Decision chain check
+
+The five `spend` calls above emitted five decision events. `scripts/collect_decisions.py` reads them from the receipts in block order and reads `get_head_hash` from the vault. `scripts/replay_head.py` hashes the lines as printed and compares the result with the head.
+
+| Check | Result |
+|---|---|
+| Replay of the five events against the head `9c071ee702f9b42522a84eda8368f60b708dc7b822064de14211a1bc2b4bf52e` | `chain OK` |
+| The same file with one byte of the first line changed | `chain BROKEN` |
+
+Run it with `python3 scripts/collect_decisions.py https://free.rpc.fastnear.com leash2-vault.near leash2-agent.near <file of transaction ids> <events file> --head`, then `python3 scripts/replay_head.py <events file> <head>`. The chain covers the decisions of `spend` and `spend_intent`. Owner actions are not chained.
+
 ## Retired vault
 
 Retired vault: `leash-vault.near` held the first mainnet swap. The account was deleted and its name is now controlled by another key. Its transactions remain on chain.
@@ -87,7 +112,11 @@ The first deploy was rejected with a link error ("unknown or invalid import") an
 | Value | Reading | Read on |
 |---|---|---|
 | Code on `leash2-vault.near` | SHA-256 `18f112959fc2a6ec4a83489803589c83872c43564e96cd94ac70df1f1113dff0` (`vault-has-code.sh`) | 2026-11-13 |
-| Head hash | 64 zeros (`get_head_hash`) | 2026-11-13 |
+| Head hash after deploy | 64 zeros (`get_head_hash`) | 2026-11-13 |
+| Head hash after the five decisions | `9c071ee702f9b42522a84eda8368f60b708dc7b822064de14211a1bc2b4bf52e` (`collect_decisions.py --head`) | 2026-11-13 |
+| Keys of the vault | one full-access key (`near account list-keys`) | 2026-11-13 |
+| Keys of the guardian | one full-access key and one function-call key for `approve_intent` on the vault, allowance 0.07 NEAR | 2026-11-13 |
+| Keys of the agent | one full-access key and one function-call key for `spend` and `spend_intent` on the vault, allowance 0.3073 NEAR | 2026-11-13 |
 | Agent policy caps | 0.15 NEAR per transaction, 0.30 NEAR per 24 hours, not paused (`get_policy`) | 2026-11-13 |
 | Guardian and wNEAR contract | `leash2-guardian.near` (`get_guardian`), `wrap.near` (`get_wnear`) | 2026-11-13 |
 | Routes | one (`get_routes`) | 2026-11-13 |
