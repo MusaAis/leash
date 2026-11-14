@@ -47,8 +47,16 @@ class DocsChecks(unittest.TestCase):
 
     def test_event_list(self):
         self.assertEqual(cd.event_gaps(SOURCE, "Events: `spend_allowed`, `spend_denied`."), [])
-        self.assertEqual(cd.event_gaps(SOURCE, "Events: `spend_allowed`."), ["README event list has no `spend_denied`"])
+        self.assertEqual(cd.event_gaps(SOURCE, "Events: `spend_allowed`."), ["docs/api.md event list has no `spend_denied`"])
         self.assertEqual(len(cd.event_gaps(SOURCE, "no events line")), 2)
+
+    def test_readme_length(self):
+        self.assertEqual(cd.readme_length_problems("word " * 1000), [])
+        self.assertEqual(len(cd.readme_length_problems("word " * 1001)), 1)
+
+    def test_api_page_is_the_target(self):
+        self.assertEqual(cd.interface_gaps(SOURCE, "`new(a)` `spend(x)` `spend_intent(y)`"), [])
+        self.assertTrue(cd.interface_gaps(SOURCE, "README only"))
 
     def test_badge(self):
         good = 'badge/network-NEAR%20mainnet%20and%20testnet-informational"'

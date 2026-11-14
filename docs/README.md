@@ -3,6 +3,7 @@
 | Page | Contents |
 |---|---|
 | [Architecture](architecture.md) | Components, roles and data flow |
+| [Contract API](api.md) | Methods, events and denial reasons |
 | [Agent runtime](agent.md) | The agent, the model, injection handling and cost limits |
 | [Arena](arena.md) | The public injection test: tiers, definitions, limits and the stop switches |
 | [Deployment guide](deployment.md) | Creating a vault on testnet or mainnet |
